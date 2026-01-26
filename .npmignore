@@ -1,0 +1,12 @@
+node_modules/
+docs/
+.git/
+.env
+tests/
+__tests__/
+*.log
+babel.config.cjs
+jest.config.cjs
+jest.config.mjs
+package-lock.json
+coverage/

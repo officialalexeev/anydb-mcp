@@ -1,0 +1,81 @@
+{
+  "name": "anydb-mcp",
+  "version": "1.0.0",
+  "description": "The ultimate universal database connector for AI Agents (Cursor, Claude, Gemini, Zed, Cline). Zero-config MCP server for PostgreSQL, MySQL, SQLite, MongoDB, and Redis.",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": "./src/index.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "bin": {
+    "anydb-mcp": "./src/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/officialalexeev/anydb-mcp"
+  },
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node ./node_modules/jest/bin/jest.js --config=jest.config.cjs"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "database",
+    "db",
+    "sql",
+    "nosql",
+    "postgres",
+    "postgresql",
+    "mysql",
+    "mariadb",
+    "sqlite",
+    "sqlite3",
+    "mongodb",
+    "mongo",
+    "redis",
+    "ai",
+    "llm",
+    "agent",
+    "tool",
+    "cursor",
+    "cursor-mcp",
+    "zed",
+    "zed-editor",
+    "claude",
+    "claude-desktop",
+    "gemini",
+    "gemini-cli",
+    "google-gemini",
+    "cline",
+    "roo-cline",
+    "vscode",
+    "backend",
+    "connector",
+    "function-calling",
+    "context"
+  ],
+  "author": "Alexeev Alexandr <officialalexeev@yandex.ru>",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.1",
+    "mongodb": "^6.3.0",
+    "mysql2": "^3.16.1",
+    "pg": "^8.11.3",
+    "redis": "^5.10.0",
+    "sqlite3": "^5.1.7"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.28.6",
+    "@babel/preset-env": "^7.28.6",
+    "babel-jest": "^30.2.0",
+    "jest": "^30.2.0"
+  }
+}
