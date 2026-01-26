@@ -92,7 +92,7 @@ Add to your `mcp_servers.json`:
 {
   "mcpServers": {
     "anydb": {
-      "command": "npx.cmd",
+      "command": "npx",
       "args": ["-y", "anydb-mcp"]
     }
   }
