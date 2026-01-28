@@ -180,4 +180,4 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for deta
 
 ## License
 
-MIT © [Alexeev Alexandr](https://github.com/alex-code)
+MIT © [Alexeev Alexandr](https://github.com/officialalexeev)
