@@ -2,105 +2,117 @@ import { createClient } from 'redis';
 import { BaseAdapter } from '../core/base-adapter.js';
 
 export class RedisAdapter extends BaseAdapter {
-  constructor(clientClass = createClient) {
-    super();
+  constructor(clientClass = createClient, timeout = 30000) {
+    super(5000, timeout);
     this.ClientClass = clientClass;
   }
 
   async connect(uri) {
-    // Если URI не содержит префикса redis://, добавим его
+    // If URI doesn't have redis:// prefix, add it
     if (!uri.startsWith('redis://') && !uri.startsWith('rediss://')) {
       uri = 'redis://' + uri;
     }
-    
-    this.client = this.ClientClass({ url: uri });
+
+    this.client = this.ClientClass({
+      url: uri,
+      socket: {
+        connectTimeout: this.connectTimeout,
+        timeout: this.queryTimeout,
+      }
+    });
     await this.client.connect();
   }
 
   async execute(commandStr, options = {}) {
     try {
-      // Парсим строку команды, учитывая кавычки
+      // Parse command string, handling quotes
       const parts = this.parseCommand(commandStr);
       if (parts.length === 0) return [];
 
       const command = parts[0].toUpperCase();
       const args = parts.slice(1);
 
-      // Выполняем команду Redis
+      // Execute Redis command
       let result;
       switch (command) {
         case 'GET':
           result = await this.client.get(args[0]);
-          // Если результат - строка, попробуем распарсить как JSON
+          // If result is string, try to parse as JSON
           if (typeof result === 'string') {
             try {
               result = JSON.parse(result);
             } catch (e) {
-              // Если не JSON, возвращаем как есть
+              // If not JSON, return as-is
             }
           }
-          result = [result]; // Оборачиваем в массив для согласованности
+          result = [result]; // Wrap in array for consistency
           break;
-          
+
         case 'SET':
           result = await this.client.set(args[0], args[1]);
-          result = [{ status: result }]; // Оборачиваем в массив
+          result = [{ status: result }]; // Wrap in array
           break;
-          
+
         case 'HGETALL':
           result = await this.client.hGetAll(args[0]);
-          result = [result]; // Оборачиваем в массив
+          result = [result]; // Wrap in array
           break;
-          
+
         case 'HMGET':
           result = await this.client.hmGet(args[0], args.slice(1));
-          result = [result]; // Оборачиваем в массив
+          result = [result]; // Wrap in array
           break;
-          
+
         case 'LRANGE':
           result = await this.client.lRange(args[0], parseInt(args[1]), parseInt(args[2]));
-          // LRANGE возвращает массив, оборачивать не нужно
+          // LRANGE returns array, no wrapping needed
           break;
-          
+
         case 'KEYS':
           result = await this.client.KEYS(args[0]);
-          result = result.map(key => ({ key })); // Форматируем как массив объектов
+          result = result.map(key => ({ key })); // Format as array of objects
           break;
-          
+
         case 'EXISTS':
           result = await this.client.exists(args[0]);
-          result = [{ exists: result }]; // Оборачиваем в массив
+          result = [{ exists: result }]; // Wrap in array
           break;
-          
+
         case 'DEL':
           result = await this.client.del(args[0]);
-          result = [{ deleted: result }]; // Оборачиваем в массив
+          result = [{ deleted: result }]; // Wrap in array
           break;
-          
+
         case 'FLUSHDB':
           result = await this.client.flushDb();
-          result = [{ flushed: result }]; // Оборачиваем в массив
+          result = [{ flushed: result }]; // Wrap in array
           break;
-          
+
         default:
-          // Для других команд пробуем выполнить напрямую
+          // For other commands, try to execute directly
           result = await this.client.sendCommand([command, ...args]);
           if (Array.isArray(result)) {
-            // Если результат - массив, оставляем как есть
+            // If result is array, keep as-is
           } else {
-            // Иначе оборачиваем в массив
+            // Otherwise wrap in array
             result = [result];
           }
           break;
       }
 
-      // Если результат не массив, оборачиваем в массив
+      // If result is not array, wrap it
       if (!Array.isArray(result)) {
         result = [result];
       }
 
       return result;
     } catch (err) {
+      // Timeout and connection errors
+      if (err.message.includes('timed out') || 
+          err.message.includes('Socket closed') ||
+          err.name === 'SocketClosedUnexpectedlyError') {
+        throw new Error(`Redis command timed out after ${this.queryTimeout}ms`);
+      }
       throw new Error(`Redis Command Error: ${err.message}`);
     }
   }
@@ -146,7 +158,12 @@ export class RedisAdapter extends BaseAdapter {
 
   async close() {
     if (this.client) {
-      await this.client.quit();
+      try {
+        await this.client.quit();
+      } catch (err) {
+        // Ignore errors on close
+        console.error('Warning: Redis close() failed:', err.message);
+      }
     }
   }
 }

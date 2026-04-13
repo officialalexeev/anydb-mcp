@@ -47,7 +47,7 @@ describe('RedisAdapter', () => {
     };
 
     mockCreateClient = jest.fn(() => mockClient);
-    adapter = new RedisAdapter(mockCreateClient);
+    adapter = new RedisAdapter(mockCreateClient, 30000);
   });
 
   describe('connect', () => {
@@ -58,6 +58,13 @@ describe('RedisAdapter', () => {
 
       expect(adapter.client).toBe(mockClient);
       expect(mockConnect).toHaveBeenCalled();
+      expect(mockCreateClient).toHaveBeenCalledWith({
+        url: 'redis://localhost:6379',
+        socket: {
+          connectTimeout: 5000,
+          timeout: 30000
+        }
+      });
     });
 
     test('should add redis:// prefix if missing', async () => {
@@ -181,6 +188,22 @@ describe('RedisAdapter', () => {
 
       await expect(adapter.execute('GET mykey')).rejects.toThrow(
         'Redis Command Error: Connection refused'
+      );
+    });
+
+    test('should handle timeout error', async () => {
+      mockGet.mockRejectedValue(new Error('Request timed out'));
+
+      await expect(adapter.execute('GET mykey')).rejects.toThrow(
+        'Redis command timed out after 30000ms'
+      );
+    });
+
+    test('should handle socket closed error', async () => {
+      mockGet.mockRejectedValue(new Error('Socket closed unexpectedly'));
+
+      await expect(adapter.execute('GET mykey')).rejects.toThrow(
+        'Redis command timed out after 30000ms'
       );
     });
   });

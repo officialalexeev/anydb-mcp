@@ -1,15 +1,16 @@
 import sqlite3 from 'sqlite3';
 import { BaseAdapter } from '../core/base-adapter.js';
+import { callbackWithTimeout } from '../core/timeout-utils.js';
 
 export class SQLiteAdapter extends BaseAdapter {
-  constructor(databaseClass = sqlite3.Database) {
-    super();
+  constructor(databaseClass = sqlite3.Database, timeout = 30000) {
+    super(0, timeout); // SQLite is local, no connection timeout needed
     this.DatabaseClass = databaseClass;
   }
 
   async connect(uri) {
-    // Для SQLite uri обычно является путем к файлу
-    // Удаляем протокол и query параметры
+    // For SQLite, uri is usually the file path
+    // Remove protocol and query parameters
     let path = uri.replace('sqlite://', '');
     const qIndex = path.indexOf('?');
     if (qIndex !== -1) {
@@ -19,28 +20,36 @@ export class SQLiteAdapter extends BaseAdapter {
   }
 
   async execute(sql) {
-    return new Promise((resolve, reject) => {
-      this.db.all(sql, [], (err, rows) => {
-        if (err) {
-          reject(new Error(`SQLite Error: ${err.message}`));
-        } else {
-          resolve(rows);
-        }
-      });
+    return callbackWithTimeout(
+      (callback) => {
+        this.db.all(sql, [], callback);
+      },
+      this.queryTimeout,
+      'SQLite query'
+    ).catch(err => {
+      if (err.message.includes('timed out')) {
+        throw new Error(`Query exceeded ${this.queryTimeout}ms timeout`);
+      }
+      throw new Error(`SQLite Error: ${err.message}`);
     });
   }
 
   async close() {
-    if (this.db) {
-      return new Promise((resolve, reject) => {
-        this.db.close((err) => {
-          if (err) {
-            reject(new Error(`Failed to close SQLite connection: ${err.message}`));
-          } else {
-            resolve();
-          }
-        });
-      });
-    }
+    if (!this.db) return;
+    
+    return callbackWithTimeout(
+      (callback) => {
+        this.db.close(callback);
+      },
+      5000, // Close timeout 5 seconds
+      'SQLite close'
+    ).catch(err => {
+      if (err.message.includes('timed out')) {
+        // Ignore close timeout
+        console.error('Warning: SQLite close() timed out');
+      } else {
+        throw new Error(`Failed to close SQLite connection: ${err.message}`);
+      }
+    });
   }
 }

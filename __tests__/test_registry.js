@@ -1,10 +1,16 @@
-const { AdapterRegistry } = require('../src/core/registry.js');
+const { AdapterRegistry, TimeoutError, DEFAULT_TIMEOUT } = require('../src/core/registry.js');
 
 describe('AdapterRegistry', () => {
   let registry;
 
   beforeEach(() => {
     registry = new AdapterRegistry();
+  });
+
+  describe('DEFAULT_TIMEOUT', () => {
+    test('should be 30000ms', () => {
+      expect(DEFAULT_TIMEOUT).toBe(30000);
+    });
   });
 
   describe('extractProtocol', () => {
@@ -52,12 +58,54 @@ describe('AdapterRegistry', () => {
         registry.validate('{}', 'mongodb', { collection: 'users' });
       }).not.toThrow();
     });
+
+    test('should throw error for invalid timeout (negative)', () => {
+      expect(() => {
+        registry.validate('SELECT 1', 'postgres', { timeout: -100 });
+      }).toThrow('Timeout must be a positive number (milliseconds).');
+    });
+
+    test('should throw error for invalid timeout (string)', () => {
+      expect(() => {
+        registry.validate('SELECT 1', 'postgres', { timeout: '5000' });
+      }).toThrow('Timeout must be a positive number (milliseconds).');
+    });
+
+    test('should accept valid timeout', () => {
+      expect(() => {
+        registry.validate('SELECT 1', 'postgres', { timeout: 15000 });
+      }).not.toThrow();
+    });
   });
 
   describe('run method', () => {
     test('should throw error for unsupported protocol', async () => {
       await expect(registry.run('unknown://localhost', 'SELECT * FROM table'))
         .rejects.toThrow('Protocol "unknown" is not supported. Supported: postgres, postgresql, mongodb, sqlite, redis, mysql');
+    });
+
+    test('should use default timeout when not specified', async () => {
+      const mockAdapter = {
+        connect: jest.fn().mockResolvedValue(),
+        execute: jest.fn().mockResolvedValue([{ result: 1 }]),
+        close: jest.fn().mockResolvedValue()
+      };
+
+      const registryWithMock = new AdapterRegistry(
+        undefined, undefined, undefined, undefined, undefined
+      );
+      registryWithMock.mapping = {
+        'test': () => mockAdapter
+      };
+      registryWithMock.extractProtocol = () => 'test';
+      registryWithMock.validate = () => {};
+
+      // Should complete within default timeout
+      const start = Date.now();
+      await registryWithMock.run('test://localhost', 'SELECT 1');
+      const elapsed = Date.now() - start;
+      
+      expect(elapsed).toBeLessThan(DEFAULT_TIMEOUT);
     });
   });
 });

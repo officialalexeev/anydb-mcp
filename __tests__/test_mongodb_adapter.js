@@ -8,49 +8,57 @@ describe('MongoAdapter', () => {
   let mockCollection;
   let mockFind;
   let mockLimit;
+  let mockMaxTimeMS;
   let mockToArray;
   let mockDb;
+  let mockClientConstructor;
 
   beforeEach(() => {
     mockConnect = jest.fn().mockResolvedValue();
     mockClose = jest.fn().mockResolvedValue();
     mockFind = jest.fn();
     mockLimit = jest.fn();
+    mockMaxTimeMS = jest.fn();
     mockToArray = jest.fn();
-    
+
     // Мокаем результаты цепочки вызовов
     mockFind.mockReturnValue({ limit: mockLimit });
-    mockLimit.mockReturnValue({ toArray: mockToArray });
-    
+    mockLimit.mockReturnValue({ maxTimeMS: mockMaxTimeMS });
+    mockMaxTimeMS.mockReturnValue({ toArray: mockToArray });
+
     mockCollection = {
       find: mockFind
     };
-    
+
     mockDb = {
       collection: jest.fn(() => mockCollection)
     };
-    
+
     mockClient = {
       connect: mockConnect,
       close: mockClose,
       db: mockDb
     };
-    
+
     // Создаем мок-конструктор
-    const mockClientConstructor = jest.fn(() => mockClient);
-    
-    adapter = new MongoAdapter(mockClientConstructor);
+    mockClientConstructor = jest.fn(() => mockClient);
+
+    adapter = new MongoAdapter(mockClientConstructor, 30000);
   });
 
   describe('connect', () => {
     test('should connect to MongoDB with correct URI', async () => {
       const uri = 'mongodb://localhost:27017/mydb';
-      
+
       await adapter.connect(uri);
-      
+
       expect(adapter.client).toBe(mockClient);
       expect(adapter.db).toBe(mockDb);
       expect(mockConnect).toHaveBeenCalled();
+      expect(mockClientConstructor).toHaveBeenCalledWith('mongodb://localhost:27017/mydb', {
+        serverSelectionTimeoutMS: 5000,
+        connectTimeoutMS: 5000
+      });
     });
   });
 
@@ -78,14 +86,27 @@ describe('MongoAdapter', () => {
     test('should parse JSON query string correctly', async () => {
       const mockResults = [];
       mockToArray.mockResolvedValue(mockResults);
-      
+
       const query = '{"age": {"$gte": 18}}';
       const options = { collection: 'users' };
-      
+
       await adapter.connect('mongodb://localhost:27017/mydb');
       await adapter.execute(query, options);
-      
+
       expect(mockCollection.find).toHaveBeenCalledWith({ age: { "$gte": 18 } });
+    });
+
+    test('should handle MongoDB timeout error', async () => {
+      mockToArray.mockRejectedValue({ 
+        name: 'MongoServerError', 
+        code: 50, 
+        message: 'execution time limit exceeded' 
+      });
+
+      await adapter.connect('mongodb://localhost:27017/mydb');
+
+      await expect(adapter.execute('{"slow": true}', { collection: 'users' }))
+        .rejects.toThrow('Query exceeded 30000ms timeout (maxTimeMS)');
     });
   });
 

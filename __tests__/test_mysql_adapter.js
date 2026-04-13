@@ -17,7 +17,7 @@ describe('MySQLAdapter', () => {
     };
 
     mockCreateConnection = jest.fn().mockResolvedValue(mockConnection);
-    adapter = new MySQLAdapter(mockCreateConnection);
+    adapter = new MySQLAdapter(mockCreateConnection, 30000);
   });
 
   describe('connect', () => {
@@ -32,7 +32,8 @@ describe('MySQLAdapter', () => {
         port: 3306,
         user: 'user',
         password: 'password',
-        database: 'database'
+        database: 'database',
+        connectTimeout: 5000
       });
     });
 
@@ -47,7 +48,8 @@ describe('MySQLAdapter', () => {
         port: 3306,
         user: 'user',
         password: '',
-        database: 'database'
+        database: 'database',
+        connectTimeout: 5000
       });
     });
 
@@ -62,7 +64,8 @@ describe('MySQLAdapter', () => {
         port: 3306,
         user: 'user',
         password: 'password',
-        database: 'database'
+        database: 'database',
+        connectTimeout: 5000
       });
     });
 
@@ -82,17 +85,30 @@ describe('MySQLAdapter', () => {
       const result = await adapter.execute('SELECT * FROM users');
 
       expect(result).toEqual(mockRows);
-      expect(mockExecute).toHaveBeenCalledWith('SELECT * FROM users');
+      expect(mockExecute).toHaveBeenCalledWith('SELECT * FROM users', [], { timeout: 30000 });
     });
 
     test('should throw error with SQL syntax info when query fails', async () => {
       const errorMessage = 'Unknown table \'nonexistent_table\'';
-      mockExecute.mockRejectedValue(new Error(errorMessage));
+      mockExecute.mockRejectedValueOnce(new Error(errorMessage));
 
       await adapter.connect('mysql://user:password@localhost:3306/database');
 
       await expect(adapter.execute('SELECT * FROM nonexistent_table')).rejects.toThrow(
         `MySQL Syntax Error: ${errorMessage}`
+      );
+    });
+
+    test('should handle connection lost error as timeout', async () => {
+      mockExecute.mockRejectedValueOnce({ 
+        code: 'PROTOCOL_CONNECTION_LOST', 
+        message: 'Connection lost' 
+      });
+
+      await adapter.connect('mysql://user:password@localhost:3306/database');
+
+      await expect(adapter.execute('SLOW QUERY')).rejects.toThrow(
+        'Query exceeded 30000ms timeout'
       );
     });
   });

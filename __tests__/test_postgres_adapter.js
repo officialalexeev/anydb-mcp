@@ -9,16 +9,16 @@ describe('PostgresAdapter', () => {
   beforeEach(() => {
     mockQuery = jest.fn();
     mockEnd = jest.fn();
-    
+
     mockPool = {
       query: mockQuery,
       end: mockEnd
     };
-    
+
     // Создаем мок-конструктор
     const mockPoolConstructor = jest.fn(() => mockPool);
-    
-    adapter = new PostgresAdapter(mockPoolConstructor);
+
+    adapter = new PostgresAdapter(mockPoolConstructor, 30000);
   });
 
   describe('connect', () => {
@@ -34,23 +34,39 @@ describe('PostgresAdapter', () => {
   describe('execute', () => {
     test('should execute query and return rows', async () => {
       const mockRows = [{ id: 1, name: 'Test' }];
-      mockQuery.mockResolvedValue({ rows: mockRows });
-      
+      // Первый вызов - SET statement_timeout, второй - сам запрос
+      mockQuery.mockResolvedValueOnce({}); // SET statement_timeout
+      mockQuery.mockResolvedValueOnce({ rows: mockRows }); // Сам запрос
+
       await adapter.connect('postgres://user:pass@localhost:5432/mydb');
       const result = await adapter.execute('SELECT * FROM users');
-      
+
       expect(result).toEqual(mockRows);
-      expect(mockQuery).toHaveBeenCalledWith('SELECT * FROM users');
+      expect(mockQuery).toHaveBeenCalledTimes(2);
+      expect(mockQuery).toHaveBeenNthCalledWith(1, 'SET statement_timeout = 30000');
+      expect(mockQuery).toHaveBeenNthCalledWith(2, 'SELECT * FROM users');
     });
 
     test('should throw error with SQL syntax info when query fails', async () => {
       const errorMessage = 'syntax error at or near "FAKE"';
-      mockQuery.mockRejectedValue(new Error(errorMessage));
-      
+      mockQuery.mockResolvedValueOnce({}); // SET statement_timeout
+      mockQuery.mockRejectedValueOnce(new Error(errorMessage)); // Сам запрос
+
       await adapter.connect('postgres://user:pass@localhost:5432/mydb');
-      
+
       await expect(adapter.execute('FAKE QUERY')).rejects.toThrow(
         `[Postgres Execute Error]: ${errorMessage}`
+      );
+    });
+
+    test('should handle statement_timeout error (57014)', async () => {
+      mockQuery.mockResolvedValueOnce({}); // SET statement_timeout
+      mockQuery.mockRejectedValueOnce({ code: '57014', message: 'canceling statement due to statement timeout' });
+
+      await adapter.connect('postgres://user:pass@localhost:5432/mydb');
+
+      await expect(adapter.execute('SLOW QUERY')).rejects.toThrow(
+        'Query exceeded 30000ms timeout (statement_timeout)'
       );
     });
   });

@@ -3,6 +3,10 @@ import { MongoAdapter } from '../adapters/mongodb.js';
 import { SQLiteAdapter } from '../adapters/sqlite.js';
 import { RedisAdapter } from '../adapters/redis.js';
 import { MySQLAdapter } from '../adapters/mysql.js';
+import { TimeoutError, withTimeout } from './base-adapter.js';
+
+// Default timeout: 30 seconds
+const DEFAULT_TIMEOUT = 30000;
 
 export class AdapterRegistry {
   constructor(poolClass = undefined, clientClass = undefined, databaseClass = undefined, redisClientClass = undefined, mysqlConnectionClass = undefined) {
@@ -13,17 +17,18 @@ export class AdapterRegistry {
     this.mysqlConnectionClass = mysqlConnectionClass;
 
     this.mapping = {
-      'postgres': () => new PostgresAdapter(this.poolClass),
-      'postgresql': () => new PostgresAdapter(this.poolClass),
-      'mongodb': () => new MongoAdapter(this.clientClass),
-      'sqlite': () => new SQLiteAdapter(this.databaseClass),
-      'redis': () => new RedisAdapter(this.redisClientClass),
-      'mysql': () => new MySQLAdapter(this.mysqlConnectionClass)
+      'postgres': (timeout) => new PostgresAdapter(this.poolClass, timeout),
+      'postgresql': (timeout) => new PostgresAdapter(this.poolClass, timeout),
+      'mongodb': (timeout) => new MongoAdapter(this.clientClass, timeout),
+      'sqlite': (timeout) => new SQLiteAdapter(this.databaseClass, timeout),
+      'redis': (timeout) => new RedisAdapter(this.redisClientClass, timeout),
+      'mysql': (timeout) => new MySQLAdapter(this.mysqlConnectionClass, timeout)
     };
   }
 
   async run(uri, query, options = {}) {
     const protocol = this.extractProtocol(uri);
+    const timeout = options.timeout || DEFAULT_TIMEOUT;
     const adapterFactory = this.mapping[protocol];
 
     if (!adapterFactory) {
@@ -32,16 +37,23 @@ export class AdapterRegistry {
 
     this.validate(query, protocol, options);
 
-    const adapter = adapterFactory();
-    await adapter.connect(uri);
+    const adapter = adapterFactory(timeout);
 
-    try {
-      return await adapter.execute(query, options);
-    } catch (err) {
-      throw new Error(`[${protocol.toUpperCase()} Execute Error]: ${err.message}`);
-    } finally {
-      await adapter.close();
-    }
+    // Global timeout for entire operation (connect + execute + close)
+    const operationPromise = (async () => {
+      await adapter.connect(uri);
+      try {
+        return await adapter.execute(query, options);
+      } finally {
+        await adapter.close();
+      }
+    })();
+
+    return await withTimeout(
+      operationPromise,
+      timeout,
+      `db_query (${protocol})`
+    );
   }
 
   extractProtocol(uri) {
@@ -54,5 +66,13 @@ export class AdapterRegistry {
     if (protocol === 'mongodb' && !options.collection) {
       throw new Error("Missing 'collection' parameter for MongoDB query.");
     }
+    // Validate timeout parameter
+    if (options.timeout !== undefined) {
+      if (typeof options.timeout !== 'number' || options.timeout < 0) {
+        throw new Error("Timeout must be a positive number (milliseconds).");
+      }
+    }
   }
 }
+
+export { TimeoutError, DEFAULT_TIMEOUT };
