@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] - 2026-09-28
+
+### Fixed
+
+- **The SQLite installation instructions were half right.** 2.0.1 pointed at two
+  interchangeable fixes, but `npm install-scripts approve` writes an `allowScripts`
+  entry into the installing project's `package.json`, and npm then ignores a
+  `.npmrc` `allow-scripts` setting in favour of it. Anyone whose `package.json`
+  already declared `allowScripts` would follow the `.npmrc` advice and get
+  "`.npmrc` allow-scripts setting is being ignored" with no way out. The
+  `approve` route is now the documented default, with the `.npmrc` caveat
+  stated. Confirmed against a clean install: `approve` plus `npm rebuild` brings
+  SQLite up, and `db_query` then answers.
+
 ## [2.0.1] - 2026-09-28
 
 ### Fixed
