@@ -9,7 +9,6 @@ npm test
 
 Node 20.19 or newer is required; that floor comes from the drivers, not a
 preference.
-
 ## Adding a database
 
 1. Create `src/adapters/<name>.js` extending `BaseAdapter`.
@@ -35,6 +34,19 @@ preference.
 - A comment should say why an assertion matters. If it only restates the
   assertion, delete it.
 
+## Before opening a pull request
+
+```bash
+npm test
+npm run verify:package
+```
+
+The second one installs the packed tarball into an empty directory and drives
+the installed server. It exists because the unit suite cannot see
+installation-time problems: it runs where this package's own `allowScripts`
+applies. If you add a dependency with an install script, or change `files`,
+`exports` or `bin`, this is the check that will notice.
+
 ## Pull requests
 
 ```bash
@@ -43,5 +55,6 @@ git commit -m '<what changed>'
 git push origin <short-branch-name>
 ```
 
-CI runs the suite on Node 20, 22 and 24, and fails on a high-severity advisory
-in the production dependencies.
+CI runs the suite on Node 20, 22 and 24 on Linux, plus Node 22 on Windows,
+verifies the packed package as a separate job, and fails on a high-severity
+advisory in the production dependencies.

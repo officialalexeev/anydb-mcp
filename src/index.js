@@ -212,6 +212,10 @@ function formatError(error, uri) {
   let suggestion;
   if (error instanceof TimeoutError) {
     suggestion = `The server did not respond within the timeout. Narrow the query, add a LIMIT, or raise the "timeout" argument.`;
+  } else if (/SQLite support is unavailable/i.test(message)) {
+    // The message already says how to fix it, so do not send the caller off to
+    // check the query instead.
+    suggestion = `This is an installation problem, not a query problem. The other four databases are unaffected.`;
   } else if (/Read-only mode/i.test(message)) {
     suggestion = `The statement was not executed. If the write is genuinely intended, retry with readOnly: false.`;
   } else if (/ECONNREFUSED|ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(message)) {

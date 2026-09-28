@@ -7,14 +7,21 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  test:
+    name: test (node ${{ matrix.node-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
         # 18 reached end of life in April 2025; 24 is the current release line.
         node-version: [20.x, 22.x, 24.x]
+        # The SQLite URI handling rewrites drive-rooted paths, so Windows is not
+        # a cosmetic second target: it exercises a branch no Linux run reaches.
+        os: [ubuntu-latest]
+        include:
+          - node-version: 22.x
+            os: windows-latest
 
     steps:
     - uses: actions/checkout@v4
@@ -24,8 +31,27 @@ jobs:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
     - run: npm ci
-    - run: npm test -- --coverage
+    # Its own script rather than `npm test -- --coverage`: npm 12 treats the
+    # flag as its own and fails with EUNKNOWNCONFIG.
+    - run: npm run test:coverage
 
     - name: Audit production dependencies
       # A vulnerable runtime dependency reaches every user of the package.
       run: npm audit --omit=dev --audit-level=high
+
+  package:
+    # The unit suite runs against the working tree, where this package's own
+    # allowScripts entry applies. 2.0.0 passed CI and still shipped a server
+    # that could not start for a consumer whose npm blocked the sqlite3 install
+    # script, so the packed artifact is installed and driven on its own.
+    name: verify packed package
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22.x
+        cache: 'npm'
+    - run: npm ci
+    - run: npm run verify:package

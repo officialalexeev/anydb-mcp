@@ -370,6 +370,30 @@ describe('AdapterRegistry', () => {
       await expect(registryWith(adapter).describe('postgres://x', { timeout: 60 }))
         .rejects.toThrow(/db_schema \(postgres\).*timed out/);
     });
+
+    // describe() skips validate(), so an unchecked timeout used to reach
+    // setTimeout. A negative value turned the guard off entirely, and a huge one
+    // overflowed Node's 32-bit timer and fired on the next tick, so every call
+    // reported a timeout it never had.
+    test.each([
+      ['abc', /must be a number of milliseconds, got abc/],
+      [-5, /must be between 1 and 86400000/],
+      [0, /must be between 1 and 86400000/],
+      [1e18, /must be between 1 and 86400000/],
+      [NaN, /must be a number of milliseconds, got NaN/],
+      [Infinity, /must be a number of milliseconds, got Infinity/]
+    ])('rejects timeout %p', async (timeout, expected) => {
+      const adapter = stubAdapter({ describe: jest.fn().mockResolvedValue({ tables: [] }) });
+      const r = registryWith(adapter);
+
+      await expect(r.describe('postgres://x', { timeout })).rejects.toThrow(expected);
+      expect(adapter.connect).not.toHaveBeenCalled();
+    });
+
+    test.each([[null], [undefined], [5000]])('accepts timeout %p', async (timeout) => {
+      const adapter = stubAdapter({ describe: jest.fn().mockResolvedValue({ tables: [] }) });
+      await expect(registryWith(adapter).describe('postgres://x', { timeout })).resolves.toBeDefined();
+    });
   });
 
   describe('read-only enforcement in run', () => {
@@ -397,5 +421,18 @@ describe('AdapterRegistry', () => {
       r.extractProtocol = () => 'redis';
       await expect(r.run('redis://x', 'FLUSHDB')).rejects.toThrow(/Read-only mode/);
     });
+
+    // The read-only verdict looks only at the leading keyword, which is SELECT
+    // here. What stops the DROP is the multiple-statement check, and it only
+    // works if the scanner ends the literal where the server ends it.
+    test.each(['postgres://x', 'postgresql://x', 'sqlite://:memory:'])(
+      'refuses a statement hidden behind a backslash on %s',
+      async (uri) => {
+        const adapter = stubAdapter();
+        await expect(registryWith(adapter).run(uri, "SELECT 'a\\'; DROP TABLE t; --'"))
+          .rejects.toThrow(/Multiple statements/);
+        expect(adapter.connect).not.toHaveBeenCalled();
+      }
+    );
   });
 });

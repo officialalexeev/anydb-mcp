@@ -42,6 +42,7 @@ export class AdapterRegistry {
       'mysql+pymysql': (timeout) => new MySQLAdapter(this.mysqlConnectionClass, timeout),
       'mysql+mysqldb': (timeout) => new MySQLAdapter(this.mysqlConnectionClass, timeout),
       'mysql+asyncmy': (timeout) => new MySQLAdapter(this.mysqlConnectionClass, timeout),
+      'mysql+aiohttp': (timeout) => new MySQLAdapter(this.mysqlConnectionClass, timeout),
       'sqlite+pysqlite': (timeout) => new SQLiteAdapter(this.databaseClass, timeout),
     };
   }
@@ -80,6 +81,7 @@ export class AdapterRegistry {
     const timeout = this.resolveTimeout(options);
 
     this.assertAdapter(protocol);
+    this.validateTimeout(options);
 
     for (const key of ['table', 'collection']) {
       if (options[key] !== undefined && typeof options[key] !== 'string') {
@@ -174,7 +176,7 @@ export class AdapterRegistry {
     // Rejected regardless of readOnly: PostgreSQL's simple query protocol runs
     // every statement in the string, so `SELECT 1; DROP TABLE t` would pass a
     // check that only reads the leading keyword.
-    if (isSqlProtocol(protocol) && hasMultipleStatements(query)) {
+    if (isSqlProtocol(protocol) && hasMultipleStatements(query, protocol)) {
       throw new Error(
         'Multiple statements in one call are not supported. Run one statement at a time.'
       );
@@ -192,20 +194,32 @@ export class AdapterRegistry {
         );
       }
     }
-    if (options.timeout !== undefined && options.timeout !== null) {
-      const { timeout } = options;
-      if (typeof timeout !== 'number' || !Number.isFinite(timeout)) {
-        throw new Error(`Timeout must be a number of milliseconds, got ${JSON.stringify(timeout)}.`);
-      }
-      if (timeout < MIN_TIMEOUT || timeout > MAX_TIMEOUT) {
-        throw new Error(
-          `Timeout must be between ${MIN_TIMEOUT} and ${MAX_TIMEOUT} milliseconds. ` +
-          `Omit it to use the ${DEFAULT_TIMEOUT}ms default.`
-        );
-      }
-    }
+    this.validateTimeout(options);
     if (options.readOnly !== undefined && typeof options.readOnly !== 'boolean') {
       throw new Error("readOnly must be a boolean.");
+    }
+  }
+
+  /**
+   * The timeout reaches setTimeout and, for PostgreSQL, a SET statement built by
+   * string interpolation, so it has to be a real number in range before any
+   * adapter sees it. Both tools go through here: `db_schema` skips `validate`,
+   * and an unchecked value either disabled the guard or overflowed it.
+   */
+  validateTimeout(options) {
+    const { timeout } = options;
+    if (timeout === undefined || timeout === null) return;
+
+    if (typeof timeout !== 'number' || !Number.isFinite(timeout)) {
+      // String(), not JSON.stringify(): the latter renders NaN and Infinity as
+      // "null", which names a value the caller never passed.
+      throw new Error(`Timeout must be a number of milliseconds, got ${String(timeout)}.`);
+    }
+    if (timeout < MIN_TIMEOUT || timeout > MAX_TIMEOUT) {
+      throw new Error(
+        `Timeout must be between ${MIN_TIMEOUT} and ${MAX_TIMEOUT} milliseconds. ` +
+        `Omit it to use the ${DEFAULT_TIMEOUT}ms default.`
+      );
     }
   }
 

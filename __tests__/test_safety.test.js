@@ -12,9 +12,17 @@ describe('read-only safety guard', () => {
       expect(stripSqlNoise('SELECT 1 # DROP TABLE t')).not.toMatch(/DROP/);
     });
 
-    test('removes escaped quotes without swallowing the rest of the statement', () => {
-      const out = stripSqlNoise("SELECT * FROM t WHERE a = 'it\\'s fine' AND b = 1");
+    test('reads MySQL string escapes, which is what its server does', () => {
+      const out = stripSqlNoise("SELECT * FROM t WHERE a = 'it\\'s fine' AND b = 1", { backslashEscapes: true });
       expect(out).toContain('b = 1');
+    });
+
+    test('ends a Postgres string at the quote, since a backslash is literal', () => {
+      // standard_conforming_strings is on, so 'it\' is a complete literal and
+      // what follows is real SQL. Treating the backslash as an escape here is
+      // what let a trailing statement hide from hasMultipleStatements.
+      const out = stripSqlNoise("SELECT * FROM t WHERE a = 'it\\'; DROP TABLE t; --'");
+      expect(out).toMatch(/DROP TABLE t/);
     });
 
     test('handles doubled single quotes', () => {
@@ -255,6 +263,26 @@ describe('read-only safety guard', () => {
       ['SELECT 1', false]
     ])('%p -> %p', (sql, expected) => {
       expect(hasMultipleStatements(sql)).toBe(expected);
+    });
+
+    // The guard reads only the leading keyword, so a semicolon hidden inside a
+    // literal is the whole attack. PostgreSQL and SQLite run with
+    // standard-conforming strings, where a backslash does not escape the quote
+    // after it, so the literal ends there and the rest is a second statement.
+    test.each(['postgres', 'postgresql', 'sqlite', 'sqlite+pysqlite'])(
+      'counts the statement a backslash hides on %s',
+      (protocol) => {
+        expect(hasMultipleStatements("SELECT 'a\\'; DROP TABLE t; --'", protocol)).toBe(true);
+        expect(hasMultipleStatements('SELECT "a\\"; DROP TABLE t; --"', protocol)).toBe(true);
+      }
+    );
+
+    test('leaves MySQL alone, whose server really does read the backslash', () => {
+      // MySQL treats 'a\' as an unterminated literal, so the text after it is
+      // string content rather than a second statement. Refusing it here would
+      // reject a legal single-statement query.
+      expect(hasMultipleStatements("SELECT * FROM t WHERE a = 'it\\'s fine' AND b = 1", 'mysql')).toBe(false);
+      expect(hasMultipleStatements("SELECT * FROM t WHERE a = 'it\\'s fine' AND b = 1", 'mysql+pymysql')).toBe(false);
     });
   });
 });

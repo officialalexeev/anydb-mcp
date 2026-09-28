@@ -98,7 +98,7 @@ Edit your `settings.json` (Cmd/Ctrl + ,):
 | Database | Protocol | Example URI |
 |----------|----------|-------------|
 | **PostgreSQL** | `postgres://`, `postgresql://` | `postgres://user:pass@localhost:5432/mydb` |
-| **MySQL** | `mysql://`, `mysql+pymysql://`, `mysql+asyncmy://` | `mysql://user:pass@localhost:3306/mydb` |
+| **MySQL** | `mysql://`, `mysql+pymysql://`, `mysql+mysqldb://`, `mysql+asyncmy://`, `mysql+aiohttp://` | `mysql://user:pass@localhost:3306/mydb` |
 | **SQLite** | `sqlite://`, `sqlite+pysqlite://` | `sqlite:///var/data/app.db` |
 | **MongoDB** | `mongodb://` | `mongodb://user:pass@localhost:27017` |
 | **Redis** | `redis://`, `rediss://` | `redis://:pass@localhost:6379` |
@@ -124,7 +124,7 @@ Executes a query. The database type is detected from the URI.
 | `allowWriteStages` | boolean | no | MongoDB only. Permit the `$out` and `$merge` aggregation stages. |
 | `limit` | number | no | MongoDB only. Documents to return. Default 50, max 1000. |
 | `readOnly` | boolean | no | Defaults to `true`. Set `false` to allow writes. |
-| `timeout` | number | no | Query timeout in ms. Default `30000`, max `86400000`. |
+| `timeout` | number | no | Query timeout in ms. Default `30000`, between `1` and `86400000`. |
 
 ### `db_schema`
 
@@ -136,7 +136,7 @@ table and column names come from the catalogue rather than from a guess.
 | `uri` | string | yes | Connection string. |
 | `table` | string | no | SQL only: describe just this table. |
 | `collection` | string | no | MongoDB only: describe just this collection. |
-| `timeout` | number | no | Timeout in ms. |
+| `timeout` | number | no | Timeout in ms. Default `30000`, between `1` and `86400000`. |
 
 It reports, per database:
 

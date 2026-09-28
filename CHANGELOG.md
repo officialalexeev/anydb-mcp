@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.3] - 2026-09-28
+
+### Fixed
+
+- **The read-only guard could be walked past on PostgreSQL and SQLite.** The
+  scanner treated a backslash as escaping the next character inside a string
+  literal, which MySQL does and PostgreSQL and SQLite do not: those run with
+  standard-conforming strings, where `\'` is a complete literal. So
+  `SELECT 'a\'; DROP TABLE t; --'` was read as one statement, passed the
+  multiple-statement check, and was then executed as two — through the simple
+  query protocol, which is exactly why that check exists. The `DROP` ran
+  against a real database. Literal scanning is now dialect-aware, and MySQL
+  keeps the permissive reading it needs, so a legal `'it\'s fine'` is still
+  not mistaken for two statements.
+- **`db_schema` ignored its own `timeout` bounds.** It does not go through
+  `validate()`, so a non-numeric value reached `setTimeout` and produced
+  `timed out after abc500ms`; a negative value silently switched the timeout
+  guard off for the whole call; and a value above `2^31` overflowed Node's
+  32-bit timer, which clamped it to 1 ms and made every `db_schema` call report
+  a timeout it never had. `db_query` validated all three correctly, and
+  `docs/timeout-configuration.md` already documented the bound for both. Both
+  tools now share one `validateTimeout`.
+- **`anydb-mcp/package.json` is exported.** `exports` allowed only the root
+  entry, so anything reading a package's installed version through
+  `require('anydb-mcp/package.json')` got `ERR_PACKAGE_PATH_NOT_EXPORTED`.
+- **`mysql+aiohttp://` now routes.** The MySQL adapter already normalised the
+  scheme, but the registry rejected it as unsupported, and `mysql+mysqldb://` was
+  routed without appearing in the README's protocol table.
+
+### Changed
+
+- **A SQLite binding error no longer suggests checking the query.** The message
+  already explains how to install the binding, and the trailing `SUGGESTION` line
+  used to contradict it with "Check the sqlite syntax".
+- **CI verifies the packed package.** 2.0.0 passed every test and still shipped
+  a server that could not start for anyone whose npm blocked the sqlite3 install
+  script, because the suite runs where this package's own `allowScripts` entry
+  applies. `npm run verify:package` packs the tarball, installs it into an empty
+  directory and drives the installed server over stdio. It runs as its own CI
+  job and as part of `prepublishOnly`.
+- **CI runs on Windows as well.** The SQLite URI handling rewrites drive-rooted
+  paths, so Windows exercises a branch no Linux run reaches.
+- **The publish guide describes the real workflow**, including 2FA, the
+  difference between verifying a local pack and verifying the registry copy, and
+  when unpublishing is the right call.
+
 ## [2.0.2] - 2026-09-28
 
 ### Fixed

@@ -12,6 +12,8 @@ const SQL_READ_KEYWORDS = new Set([
 
 // Statements that are valid SQL but are not read-only. Used only to tell a
 // deliberate write apart from a typo, so the message can say which it is.
+// Set operators and `TABLE` are absent deliberately: they are not statements,
+// and `TABLE t` is a read, so neither can ever be the leading keyword of a write.
 const SQL_WRITE_KEYWORDS = new Set([
   'INSERT', 'UPDATE', 'DELETE', 'REPLACE', 'MERGE', 'UPSERT', 'DROP', 'TRUNCATE',
   'ALTER', 'CREATE', 'RENAME', 'GRANT', 'REVOKE', 'COMMIT', 'ROLLBACK',
@@ -19,7 +21,7 @@ const SQL_WRITE_KEYWORDS = new Set([
   'DO', 'COPY', 'VACUUM', 'ANALYZE', 'REINDEX', 'CLUSTER', 'REFRESH',
   'ATTACH', 'DETACH', 'PRAGMA', 'SET', 'RESET', 'USE', 'LOAD', 'INSTALL',
   'UNINSTALL', 'CHECKPOINT', 'DISCARD', 'LISTEN', 'NOTIFY', 'DECLARE', 'PREPARE',
-  'DEALLOCATE', 'UNION', 'INTERSECT', 'EXCEPT', 'IMPORT', 'TABLE',
+  'DEALLOCATE', 'IMPORT',
 ]);
 
 // Read queries that still write or lock. Checked inside allowed statements.
@@ -35,7 +37,7 @@ const REDIS_READ_COMMANDS = new Set([
   'GET', 'MGET', 'GETRANGE', 'STRLEN', 'EXISTS', 'TYPE', 'TTL', 'PTTL',
   'DBSIZE', 'RANDOMKEY', 'SCAN', 'INFO', 'PING', 'ECHO', 'OBJECT', 'MEMORY',
   'HLEN', 'HEXISTS', 'HGET', 'HGETALL', 'HKEYS', 'HVALS', 'HMGET', 'HRANDFIELD',
-  'LLEN', 'LINDEX', 'LRANGE', 'LPOS', 'LRANGE',
+  'LLEN', 'LINDEX', 'LRANGE', 'LPOS',
   'SCARD', 'SISMEMBER', 'SMEMBERS', 'SMISMEMBER', 'SRANDMEMBER', 'SSCAN',
   'ZCARD', 'ZCOUNT', 'ZLEXCOUNT', 'ZMSCORE', 'ZRANDMEMBER', 'ZRANGE',
   'ZRANGEBYLEX', 'ZRANGEBYSCORE', 'ZRANK', 'ZREVRANGE', 'ZREVRANGEBYLEX',
@@ -58,8 +60,19 @@ const MONGO_WRITE_STAGES = ['$out', '$merge'];
  *
  * MySQL conditional comments (an exclamation mark inside a block comment) are
  * executable, so they are replaced with a marker rather than removed.
+ *
+ * @param {string} sql - Statement to clean
+ * @param {object} [options]
+ * @param {boolean} [options.backslashEscapes=false] - Whether a backslash
+ *   escapes the next character inside a string literal. Only MySQL does this by
+ *   default. PostgreSQL and SQLite run with standard-conforming strings, where
+ *   `\` is an ordinary character, so honouring it there would end a literal
+ *   early and hide a following statement from the multiple-statement check.
+ *   Reading those dialects strictly can only over-count a semicolon, which
+ *   refuses a legal query; reading them loosely can under-count it, which lets a
+ *   write through.
  */
-export function stripSqlNoise(sql) {
+export function stripSqlNoise(sql, { backslashEscapes = false } = {}) {
   let out = '';
   let i = 0;
   const n = sql.length;
@@ -88,7 +101,7 @@ export function stripSqlNoise(sql) {
       const quote = ch;
       i++;
       while (i < n) {
-        if (sql[i] === '\\') { i += 2; continue; }
+        if (backslashEscapes && sql[i] === '\\') { i += 2; continue; }
         if (sql[i] === quote) {
           if (sql[i + 1] === quote) { i += 2; continue; }
           i++;
@@ -121,10 +134,23 @@ export function stripSqlNoise(sql) {
 }
 
 /**
- * Inspect a SQL statement and report whether it is safe to run read-only.
+ * Whether the dialect treats a backslash inside a string literal as an escape.
+ * MySQL does unless NO_BACKSLASH_ESCAPES is set; PostgreSQL and SQLite do not.
+ *
+ * @param {string} protocol - Lowercase URI scheme
+ * @returns {boolean} True for the MySQL family
  */
-export function inspectSql(query) {
-  const cleaned = stripSqlNoise(query).trim();
+const usesBackslashEscapes = (protocol) => baseProtocol(protocol) === 'mysql';
+
+/**
+ * Inspect a SQL statement and report whether it is safe to run read-only.
+ *
+ * @param {string} query - Statement to inspect
+ * @param {string} [protocol] - Lowercase URI scheme, which decides how string
+ *   literals are scanned
+ */
+export function inspectSql(query, protocol = '') {
+  const cleaned = stripSqlNoise(query, { backslashEscapes: usesBackslashEscapes(protocol) }).trim();
   if (!cleaned) return { safe: false, reason: 'empty statement' };
 
   if (/\bCONDITIONAL_COMMENT\b/.test(cleaned)) {
@@ -178,10 +204,14 @@ export function inspectRedisCommand(commandStr) {
  * statement; that errs towards refusing.
  *
  * @param {string} sql - Statement to inspect
+ * @param {string} [protocol] - Lowercase URI scheme, which decides how string
+ *   literals are scanned
  * @returns {boolean} True if more than one command is present
  */
-export function hasMultipleStatements(sql) {
-  const stripped = stripSqlNoise(sql).replace(/;\s*$/, '').trim();
+export function hasMultipleStatements(sql, protocol = '') {
+  const stripped = stripSqlNoise(sql, { backslashEscapes: usesBackslashEscapes(protocol) })
+    .replace(/;\s*$/, '')
+    .trim();
   return stripped.includes(';');
 }
 
@@ -293,7 +323,7 @@ export function inspectQuery(protocol, query, options = {}) {
   }
 
   const base = baseProtocol(protocol);
-  if (SQL_PROTOCOLS.has(base)) return inspectSql(query);
+  if (SQL_PROTOCOLS.has(base)) return inspectSql(query, base);
   if (base === 'redis') return inspectRedisCommand(query);
   if (base === 'mongodb') {
     return inspectMongoOperation(query, options.action || 'find', options);
