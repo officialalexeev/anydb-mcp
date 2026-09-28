@@ -1,46 +1,49 @@
 /**
- * Timeout utilities
- */
-
-/**
- * Creates an AbortController with timeout
- * @param {number} timeoutMs - Timeout in milliseconds
- * @returns {{ controller: AbortController, timerId: NodeJS.Timeout }}
+ * The timer is left referenced on purpose: an abort guard that lets the process
+ * exit before firing would turn a hang into a silent success.
  */
 export function createTimeoutController(timeoutMs) {
   const controller = new AbortController();
-  const timerId = setTimeout(() => {
-    controller.abort();
-  }, timeoutMs);
+  const timerId = timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null;
 
   return { controller, timerId };
 }
 
 /**
- * Wraps a callback-based operation in a promise with timeout
- * @param {Function} operation - Function that accepts callback (err, result)
- * @param {number} timeoutMs - Timeout in ms
- * @param {string} operationName - Operation name
- * @returns {Promise}
+ * Wrap a node-style callback operation with a timeout.
+ *
+ * The returned promise carries a `cancel()` that disarms the timer, for callers
+ * that abandon the operation by another route, such as a database-level 'error'
+ * event.
  */
-export function callbackWithTimeout(operation, timeoutMs, operationName) {
-  return new Promise((resolve, reject) => {
-    const { controller, timerId } = createTimeoutController(timeoutMs);
+export function callbackWithTimeout(operation, timeoutMs, operationName, timeoutMessage) {
+  const { controller, timerId } = createTimeoutController(timeoutMs);
+  let settled = false;
+
+  const promise = new Promise((resolve, reject) => {
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      if (timerId) clearTimeout(timerId);
+      fn(value);
+    };
 
     operation((err, result) => {
-      clearTimeout(timerId);
-      if (controller.signal.aborted) {
-        return; // Ignore result if already timed out
-      }
-      if (err) {
-        reject(err);
-      } else {
-        resolve(result);
-      }
+      if (controller.signal.aborted) return;
+      if (err) finish(reject, err);
+      else finish(resolve, result);
     });
 
     controller.signal.addEventListener('abort', () => {
-      reject(new Error(`Operation "${operationName}" timed out after ${timeoutMs}ms`));
+      finish(reject, new Error(
+        timeoutMessage || `Operation "${operationName}" timed out after ${timeoutMs}ms`
+      ));
     }, { once: true });
   });
+
+  promise.cancel = () => {
+    if (timerId) clearTimeout(timerId);
+  };
+
+  return promise;
 }

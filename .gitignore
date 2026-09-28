@@ -27,8 +27,3 @@ yarn-error.log*
 # Build outputs
 dist/
 build/
-
-# Optional: preview folder if it's not part of the repo
-preview/
-
-docs/

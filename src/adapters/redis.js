@@ -1,5 +1,9 @@
 import { createClient } from 'redis';
 import { BaseAdapter } from '../core/base-adapter.js';
+import { RedisSchemaAdapter } from '../core/schema.js';
+
+// Reply values that are worth decoding as JSON before handing them to an agent.
+const JSON_REPLY_COMMANDS = new Set(['GET', 'HGET', 'MGET', 'HMGET', 'HGETALL']);
 
 export class RedisAdapter extends BaseAdapter {
   constructor(clientClass = createClient, timeout = 30000) {
@@ -8,9 +12,9 @@ export class RedisAdapter extends BaseAdapter {
   }
 
   async connect(uri) {
-    // If URI doesn't have redis:// prefix, add it
-    if (!uri.startsWith('redis://') && !uri.startsWith('rediss://')) {
-      uri = 'redis://' + uri;
+    // Tolerate bare `host:port` and `user:pass@host:port` forms.
+    if (!/^rediss?:\/\//i.test(uri)) {
+      uri = `redis://${uri}`;
     }
 
     this.client = this.ClientClass({
@@ -20,103 +24,52 @@ export class RedisAdapter extends BaseAdapter {
         timeout: this.queryTimeout,
       }
     });
-    await this.client.connect();
-  }
 
-  async execute(commandStr, options = {}) {
     try {
-      // Parse command string, handling quotes
-      const parts = this.parseCommand(commandStr);
-      if (parts.length === 0) return [];
-
-      const command = parts[0].toUpperCase();
-      const args = parts.slice(1);
-
-      // Execute Redis command
-      let result;
-      switch (command) {
-        case 'GET':
-          result = await this.client.get(args[0]);
-          // If result is string, try to parse as JSON
-          if (typeof result === 'string') {
-            try {
-              result = JSON.parse(result);
-            } catch (e) {
-              // If not JSON, return as-is
-            }
-          }
-          result = [result]; // Wrap in array for consistency
-          break;
-
-        case 'SET':
-          result = await this.client.set(args[0], args[1]);
-          result = [{ status: result }]; // Wrap in array
-          break;
-
-        case 'HGETALL':
-          result = await this.client.hGetAll(args[0]);
-          result = [result]; // Wrap in array
-          break;
-
-        case 'HMGET':
-          result = await this.client.hmGet(args[0], args.slice(1));
-          result = [result]; // Wrap in array
-          break;
-
-        case 'LRANGE':
-          result = await this.client.lRange(args[0], parseInt(args[1]), parseInt(args[2]));
-          // LRANGE returns array, no wrapping needed
-          break;
-
-        case 'KEYS':
-          result = await this.client.KEYS(args[0]);
-          result = result.map(key => ({ key })); // Format as array of objects
-          break;
-
-        case 'EXISTS':
-          result = await this.client.exists(args[0]);
-          result = [{ exists: result }]; // Wrap in array
-          break;
-
-        case 'DEL':
-          result = await this.client.del(args[0]);
-          result = [{ deleted: result }]; // Wrap in array
-          break;
-
-        case 'FLUSHDB':
-          result = await this.client.flushDb();
-          result = [{ flushed: result }]; // Wrap in array
-          break;
-
-        default:
-          // For other commands, try to execute directly
-          result = await this.client.sendCommand([command, ...args]);
-          if (Array.isArray(result)) {
-            // If result is array, keep as-is
-          } else {
-            // Otherwise wrap in array
-            result = [result];
-          }
-          break;
-      }
-
-      // If result is not array, wrap it
-      if (!Array.isArray(result)) {
-        result = [result];
-      }
-
-      return result;
+      await this.client.connect();
     } catch (err) {
-      // Timeout and connection errors
-      if (err.message.includes('timed out') || 
-          err.message.includes('Socket closed') ||
-          err.name === 'SocketClosedUnexpectedlyError') {
-        throw new Error(`Redis command timed out after ${this.queryTimeout}ms`);
-      }
-      throw new Error(`Redis Command Error: ${err.message}`);
+      throw describeError(err, this.connectTimeout);
     }
   }
 
+  async execute(commandStr) {
+    const parts = this.parseCommand(commandStr);
+    if (parts.length === 0) return [];
+
+    const command = parts[0].toUpperCase();
+    const args = parts.slice(1);
+
+    let reply;
+    try {
+      reply = await this.client.sendCommand([command, ...args]);
+    } catch (err) {
+      throw describeError(err, this.queryTimeout);
+    }
+
+    if (JSON_REPLY_COMMANDS.has(command) && typeof reply === 'string') {
+      try {
+        reply = JSON.parse(reply);
+      } catch {
+        // Not JSON; hand the raw string back.
+      }
+    }
+
+    return Array.isArray(reply) ? reply : [reply];
+  }
+
+  describe(options = {}) {
+    const schema = new RedisSchemaAdapter(this.connectTimeout, this.queryTimeout);
+    schema.client = this.client;
+    return schema.describe(options);
+  }
+
+  /**
+   * Split a command line on whitespace, honouring single and double quotes so
+   * values containing spaces survive.
+   *
+   * @param {string} commandStr - Raw command line
+   * @returns {string[]} Command name followed by its arguments
+   */
   parseCommand(commandStr) {
     const args = [];
     let current = '';
@@ -127,43 +80,83 @@ export class RedisAdapter extends BaseAdapter {
       const char = commandStr[i];
 
       if (inQuote) {
-        if (char === quoteChar) {
+        if (char === '\\' && i + 1 < commandStr.length) {
+          current += commandStr[++i];
+        } else if (char === quoteChar) {
           inQuote = false;
           args.push(current);
           current = '';
         } else {
           current += char;
         }
-      } else {
-        if (char === '"' || char === "'") {
-          inQuote = true;
-          quoteChar = char;
-        } else if (char === ' ') {
-          if (current.length > 0) {
-            args.push(current);
-            current = '';
-          }
-        } else {
-          current += char;
+        continue;
+      }
+
+      if (char === '"' || char === "'") {
+        inQuote = true;
+        quoteChar = char;
+      } else if (/\s/.test(char)) {
+        if (current.length > 0) {
+          args.push(current);
+          current = '';
         }
+      } else {
+        current += char;
       }
     }
 
-    if (current.length > 0 || inQuote) {
+    if (inQuote) {
+      throw new Error(`Unbalanced quote in Redis command: ${commandStr}`);
+    }
+    if (current.length > 0) {
       args.push(current);
     }
 
     return args;
   }
 
+  /** node-redis tracks its own socket state, so this needs no round trip. */
+  isHealthy() {
+    return !!this.client && this.client.isReady === true;
+  }
+
+  /** Drop the socket, so Redis stops working on an abandoned command. */
+  abort() {
+    if (!this.client) return;
+    const client = this.client;
+    this.client = null;
+    this.aborted = true;
+    try {
+      client.destroy();
+    } catch {
+      // already destroyed
+    }
+  }
+
   async close() {
-    if (this.client) {
-      try {
-        await this.client.quit();
-      } catch (err) {
-        // Ignore errors on close
+    if (!this.client) return;
+    const client = this.client;
+    this.client = null;
+
+    try {
+      await client.quit();
+    } catch (err) {
+      // A client that never opened, or a socket that already dropped, has
+      // nothing left to report.
+      if (!this.aborted && !/closed|not connected/i.test(err.message || '')) {
         console.error('Warning: Redis close() failed:', err.message);
       }
     }
   }
+}
+
+function describeError(err, timeoutMs) {
+  const message = (err && err.message) || String(err);
+  const name = err && err.name;
+
+  if (/timed out|ETIMEDOUT|ClientClosedError|SocketClosedUnexpectedlyError|ECONNREFUSED|ECONNRESET|EAI_AGAIN|ENOTFOUND/i.test(`${name} ${message}`)) {
+    return new Error(`[Redis error] ${message} (client timeout was ${timeoutMs}ms)`);
+  }
+
+  return new Error(`[Redis ${name || 'error'}] ${message}`);
 }
