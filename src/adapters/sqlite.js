@@ -1,12 +1,49 @@
-import sqlite3 from 'sqlite3';
 import { BaseAdapter } from '../core/base-adapter.js';
 import { callbackWithTimeout } from '../core/timeout-utils.js';
 import { SQLiteSchemaAdapter } from '../core/schema.js';
 
+/**
+ * sqlite3 ships a native binding built by an install script, and npm 12 blocks
+ * install scripts unless they are allow-listed. That allowance lives in the
+ * installing project's own npmrc, not ours, so a consumer who installs this
+ * package gets a sqlite3 with no binding. Importing it at module scope would
+ * take the whole server down over one optional database, so it is loaded here,
+ * and only when a SQLite URI is actually used.
+ */
+let sqlite3Promise = null;
+
+async function loadSqlite3() {
+  if (!sqlite3Promise) {
+    sqlite3Promise = import('sqlite3').catch(() => {
+      sqlite3Promise = null;
+      throw new Error(
+        'SQLite support is unavailable because the sqlite3 native binding was not built. ' +
+        'This is expected when npm blocks install scripts. Either run ' +
+        '`npm install-scripts approve sqlite3` in the project that installed this package, ' +
+        'or set allow-scripts=sqlite3 in its .npmrc, then reinstall. ' +
+        'The other four databases are unaffected.'
+      );
+    });
+  }
+  return sqlite3Promise;
+}
+
 export class SQLiteAdapter extends BaseAdapter {
-  constructor(databaseClass = sqlite3.Database, timeout = 30000) {
+  /**
+   * @param {Function} [databaseClass] - sqlite3.Database, injected by tests.
+   *   Left undefined in production so the driver is loaded lazily.
+   */
+  constructor(databaseClass = undefined, timeout = 30000) {
     super(0, timeout); // SQLite is local, no connection timeout needed
     this.DatabaseClass = databaseClass;
+  }
+
+  /** Resolve the sqlite3 Database class, loading the driver on first use. */
+  async loadDatabase() {
+    if (!this.DatabaseClass) {
+      this.DatabaseClass = (await loadSqlite3()).default.Database;
+    }
+    return this.DatabaseClass;
   }
 
   async connect(uri) {
@@ -23,13 +60,16 @@ export class SQLiteAdapter extends BaseAdapter {
     // sqlite:///C:/data.db means the drive-rooted path C:\data.db.
     path = path.replace(/^\/([A-Za-z]:)/, '$1');
 
-    this.db = new this.DatabaseClass(path);
+    const Database = await this.loadDatabase();
+    this.DatabaseClass = Database;
 
     // sqlite3 reports open failures by emitting 'error' and never calling back
     // the pending operation. Without a listener the event becomes an uncaught
     // exception and takes the whole process with it.
     this.pendingReject = null;
     this.openFailed = false;
+    this.db = new Database(path);
+
     this.db.on('error', (err) => {
       if (/SQLITE_CANTOPEN|unable to open database/i.test(err.message || '')) {
         // The handle never opened, so close() will never call back.

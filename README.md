@@ -305,6 +305,19 @@ reason the memory form is now useful.
 
 ## Known limitations
 
+- **SQLite needs its native binding built.** `sqlite3` ships a prebuilt binary
+  through an install script, and npm 12 blocks install scripts unless they are
+  allow-listed. If you hit `SQLite support is unavailable`, run this once in
+  your project:
+
+  ```bash
+  npm install-scripts approve sqlite3
+  npm rebuild sqlite3
+  ```
+
+  Or add `allow-scripts=sqlite3` to your `.npmrc`. The other four databases work
+  either way.
+
 - **A statement SQLite cannot interrupt stays on the thread pool.** `db.interrupt()`
   stops most statements, but a long recursive CTE in SQLite's C code may run to
   completion. The connection is torn down so nothing queues behind it, but the

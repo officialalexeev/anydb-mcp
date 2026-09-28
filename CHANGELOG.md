@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-09-28
+
+### Fixed
+
+- **The package no longer fails to start for consumers whose npm blocks install
+  scripts.** 2.0.0 imported sqlite3 at module scope, so a consumer whose install
+  script was blocked got a sqlite3 with no native binding, and the server died on
+  startup before any tool was called. Found by installing 2.0.0 from the registry
+  into a clean directory and running it. The driver is now loaded on first use,
+  so PostgreSQL, MySQL, MongoDB and Redis are unaffected, and a SQLite request
+  returns an error naming both ways to fix it: `npm install-scripts approve
+  sqlite3`, or `allow-scripts=sqlite3` in the installing project's `.npmrc`.
+
 ## [2.0.0] - 2026-09-28
 
 ### Breaking

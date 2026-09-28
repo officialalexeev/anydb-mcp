@@ -1,5 +1,11 @@
 import { EventEmitter } from 'node:events';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { SQLiteAdapter } from '../src/adapters/sqlite.js';
+
+// Read from the working directory rather than import.meta, which babel cannot
+// compile to CommonJS.
+const ADAPTER_SOURCE = readFileSync(join(process.cwd(), 'src', 'adapters', 'sqlite.js'), 'utf8');
 
 /** A stand-in for a sqlite3 Database handle. */
 class MockDatabase extends EventEmitter {
@@ -96,6 +102,34 @@ describe('SQLiteAdapter', () => {
       mockDb.all.mockImplementation(() => { /* never calls back */ });
 
       await expect(slow.execute('SELECT 1')).rejects.toThrow(/exceeded 60ms timeout/);
+    });
+  });
+
+  describe('driver loading', () => {
+    test('reports an actionable error when the native binding is missing', async () => {
+      // What a consumer sees once npm blocks the sqlite3 install script.
+      const lazy = new SQLiteAdapter();
+      lazy.loadDatabase = () => Promise.reject(new Error(
+        'SQLite support is unavailable because the sqlite3 native binding was not built.'
+      ));
+
+      await expect(lazy.connect('sqlite://:memory:')).rejects.toThrow(
+        /SQLite support is unavailable/
+      );
+    });
+
+    test('names both ways to fix a missing binding', () => {
+      expect(ADAPTER_SOURCE).toMatch(/install-scripts approve sqlite3/);
+      expect(ADAPTER_SOURCE).toMatch(/allow-scripts=sqlite3/);
+      // A static import would abort startup for every consumer, not just SQLite.
+      expect(ADAPTER_SOURCE).not.toMatch(/^import sqlite3 from/m);
+      expect(ADAPTER_SOURCE).toMatch(/import\('sqlite3'\)/);
+    });
+
+    test('uses an injected Database class without loading the driver', async () => {
+      const injected = new SQLiteAdapter(MockDatabase, 30000);
+      await injected.connect('sqlite://:memory:');
+      expect(injected.db).toBeInstanceOf(MockDatabase);
     });
   });
 

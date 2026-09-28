@@ -1,6 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -383,6 +384,34 @@ describe('MCP server end to end', () => {
         uri: 'mongodb://127.0.0.1:1/x', query: '{}', collection: 'c', action: 'count', timeout: 2000
       });
       expect(text).not.toMatch(/Read-only mode/);
+    });
+  });
+
+  describe('driver availability', () => {
+    // A published consumer can end up with a sqlite3 whose native binding was
+    // never built, because npm blocks install scripts and the allow-list lives
+    // in the installing project, not here. That must not take the other four
+    // databases down with it, so sqlite3 is loaded lazily. The failure path
+    // itself is covered in test_sqlite_adapter.test.js.
+    test('the registry does not import sqlite3 at module scope', async () => {
+      const registrySource = readFileSync(join(process.cwd(), 'src', 'core', 'registry.js'), 'utf8');
+      const adapterSource = readFileSync(join(process.cwd(), 'src', 'adapters', 'sqlite.js'), 'utf8');
+
+      expect(registrySource).toMatch(/from '\.\.\/adapters\/sqlite\.js'/);
+      // A static import here would abort startup for every consumer.
+      expect(adapterSource).not.toMatch(/^import sqlite3/m);
+      expect(adapterSource).toMatch(/import\('sqlite3'\)/);
+    });
+
+    test('the server still starts and serves the other adapters', async () => {
+      const { tools } = await client.listTools();
+      expect(tools.map(t => t.name).sort()).toEqual(['db_query', 'db_schema']);
+
+      const pg = await call({
+        uri: 'postgres://u:p@127.0.0.1:1/x', query: 'SELECT 1', timeout: 2000
+      });
+      expect(pg.isError).toBe(true);
+      expect(pg.text).not.toMatch(/bindings/i);
     });
   });
 
