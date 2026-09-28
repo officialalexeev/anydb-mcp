@@ -78,7 +78,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returns an error naming both ways to fix it: `npm install-scripts approve
   sqlite3`, or `allow-scripts=sqlite3` in the installing project's `.npmrc`.
 
-## [2.0.0] - 2026-09-28
+## [2.0.0] - 2026-09-28 (withdrawn)
+
+**Not published.** This version was on the registry for a few minutes and then
+withdrawn, because installing it broke the server for every consumer whose npm
+blocked the sqlite3 install script. It was never installed by anyone, so npm has
+no `2.0.0` and the `v2.0.0` tag points at the commit rather than a release you
+can fetch. The description below is kept because those changes are what the rest
+of the 2.x line is made of; they are all present in 2.0.1 and later.
 
 ### Breaking
 
