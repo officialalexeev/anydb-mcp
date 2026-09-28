@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.4] - 2026-09-28
+
+### Documentation
+
+- **The changelog no longer describes a release that does not exist.** 2.0.0 is
+  marked as withdrawn, so this file matches what npm actually holds. Its entry is
+  kept, because those changes are what the rest of the 2.x line consists of.
+- **`docs/publication_guide_ru.md` matches `docs/build-and-publish.md`.** It told
+  the reader to run `npm version patch`, which creates a commit and a tag by
+  itself and would have produced a release commit describing nothing. It also
+  omitted 2FA, `prepublishOnly` and the packaged verification that 2.0.0 taught
+  us was missing. Both guides now describe the same flow.
+
+No code changed. 2.0.1 and 2.0.2 are deprecated; `npm install anydb-mcp` and
+`npx anydb-mcp` already resolve to 2.0.3 or later.
+
 ## [2.0.3] - 2026-09-28
 
 ### Fixed
