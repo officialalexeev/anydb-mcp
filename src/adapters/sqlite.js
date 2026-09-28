@@ -18,9 +18,11 @@ async function loadSqlite3() {
       sqlite3Promise = null;
       throw new Error(
         'SQLite support is unavailable because the sqlite3 native binding was not built. ' +
-        'This is expected when npm blocks install scripts. Either run ' +
+        'This is expected when npm blocks install scripts. Run ' +
         '`npm install-scripts approve sqlite3` in the project that installed this package, ' +
-        'or set allow-scripts=sqlite3 in its .npmrc, then reinstall. ' +
+        'then `npm rebuild sqlite3`. That writes an allowScripts entry into that ' +
+        "project's package.json. Setting allow-scripts=sqlite3 in .npmrc only works " +
+        'while that package.json has no allowScripts field of its own. ' +
         'The other four databases are unaffected.'
       );
     });

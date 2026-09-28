@@ -315,8 +315,10 @@ reason the memory form is now useful.
   npm rebuild sqlite3
   ```
 
-  Or add `allow-scripts=sqlite3` to your `.npmrc`. The other four databases work
-  either way.
+  The first command writes an `allowScripts` entry into your `package.json`.
+  Setting `allow-scripts=sqlite3` in `.npmrc` works too, but only while your
+  `package.json` has no `allowScripts` field of its own — npm ignores `.npmrc`
+  in favour of it. The other four databases work either way.
 
 - **A statement SQLite cannot interrupt stays on the thread pool.** `db.interrupt()`
   stops most statements, but a long recursive CTE in SQLite's C code may run to
