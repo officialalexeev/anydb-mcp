@@ -1,6 +1,5 @@
-import { BaseAdapter, positiveInt } from '../core/base-adapter.js';
+import { BaseAdapter, positiveInt, logCloseFailure } from '../core/base-adapter.js';
 import { findWriteStage, TOO_DEEP } from '../core/safety.js';
-import { logError } from '../core/logging.js';
 import { MongoSchemaAdapter } from '../core/schema.js';
 
 const DEFAULT_LIMIT = 50;
@@ -406,15 +405,10 @@ export class MongoAdapter extends BaseAdapter {
       try {
         await client.close();
       } catch (err) {
-        if (!this.aborted) {
-          // Through the logger rather than console.error: attributable, masked by
-          // the same rules as every other record, and the error object is kept,
-          // which is what makes "ANYDB_DEBUG=1 for a stack trace" true here.
-          try {
-            logError('adapter_close', err, { adapter: 'mongodb' });
-          } catch {
-            // Degraded logging is still better than a close() that throws.
-          }
+        try {
+          logCloseFailure('mongodb', err, { aborted: this.aborted });
+        } catch {
+          // Degraded logging is still better than a close() that throws.
         }
       }
     }

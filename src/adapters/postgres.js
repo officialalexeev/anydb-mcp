@@ -1,5 +1,4 @@
-import { BaseAdapter, positiveInt } from '../core/base-adapter.js';
-import { logError } from '../core/logging.js';
+import { BaseAdapter, positiveInt, logCloseFailure } from '../core/base-adapter.js';
 import { PostgresSchemaAdapter } from '../core/schema.js';
 
 // Concurrent statements one cached connection may have in flight. Same shape of
@@ -348,11 +347,8 @@ export class PostgresAdapter extends BaseAdapter {
     try {
       await ending;
     } catch (err) {
-    // Through the logger rather than console.error: attributable, masked by the
-    // same rules as every other record, and the error object survives, which is
-    // what makes "ANYDB_DEBUG=1 for a stack trace" true on the abort path.
-    try {
-        logError('adapter_close', err, { adapter: 'postgres' });
+      try {
+        logCloseFailure('postgres', err, { aborted: this.aborted });
       } catch {
         // Degraded logging is still better than a close() that throws.
       }

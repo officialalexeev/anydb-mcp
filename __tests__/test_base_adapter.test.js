@@ -1,4 +1,4 @@
-import { BaseAdapter, TimeoutError, withTimeout, TIMEOUT_GRACE_MS } from '../src/core/base-adapter.js';
+import { BaseAdapter, TimeoutError, withTimeout, TIMEOUT_GRACE_MS, logCloseFailure } from '../src/core/base-adapter.js';
 
 describe('BaseAdapter', () => {
   test('carries the connect and query timeouts', () => {
@@ -109,5 +109,70 @@ describe('TIMEOUT_GRACE_MS', () => {
   test('the grace window is bounded', () => {
     expect(TIMEOUT_GRACE_MS).toBeGreaterThan(0);
     expect(TIMEOUT_GRACE_MS).toBeLessThan(5000);
+  });
+});
+
+describe('logCloseFailure', () => {
+  let written;
+  let spy;
+  let level;
+
+  beforeEach(() => {
+    written = [];
+    level = process.env.ANYDB_LOG_LEVEL;
+    process.env.ANYDB_LOG_LEVEL = 'debug';
+    spy = jest.spyOn(console, 'error').mockImplementation((...a) => written.push(a.join(' ')));
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+    if (level === undefined) delete process.env.ANYDB_LOG_LEVEL;
+    else process.env.ANYDB_LOG_LEVEL = level;
+  });
+
+  // At debug the stack is logged after the message, so the last line is the
+  // stack. Find the line that carries the level instead.
+  const record = (event) =>
+    written.find((l) => l.includes(event) && !l.includes('.stack')) || '';
+
+  // Closing twice is what the cache does when it evicts an entry a caller still
+  // holds, and it is not a fault. A stack trace on stderr for every eviction is
+  // what 3.0.0 shipped.
+  test.each([
+    'pool is closed',
+    'Client is closed',
+    'Connection closed',
+    'not connected',
+    'client is closed',
+    'server is closed',
+    'socket is closed',
+  ])('logs "%s" at debug, not error', (message) => {
+    expect(logCloseFailure('postgres', new Error(message))).toBe('debug');
+    expect(record('adapter_close')).toMatch(/\bdebug\b/);
+    expect(record('adapter_close')).not.toMatch(/\berror\b/);
+  });
+
+  test('a real teardown failure is still an error', () => {
+    const err = new Error('could not reach the server');
+    err.code = 'ECONNRESET';
+    expect(logCloseFailure('postgres', err)).toBe('error');
+    expect(record('adapter_close')).toMatch(/\berror\b/);
+    expect(record('adapter_close')).toMatch(/ECONNRESET/);
+  });
+
+  test('a close after abort is debug whatever the driver says', () => {
+    expect(logCloseFailure('mysql', new Error('permission denied'), { aborted: true })).toBe('debug');
+    expect(record('adapter_close')).toMatch(/\bdebug\b/);
+    expect(record('adapter_close')).not.toMatch(/\berror\b/);
+  });
+
+  test('the adapter name is on the record', () => {
+    logCloseFailure('mongodb', new Error('pool is closed'));
+    expect(record('adapter_close')).toMatch(/adapter=mongodb/);
+  });
+
+  test('a non-Error throw is reported, not rethrown', () => {
+    expect(logCloseFailure('sqlite', 'plain string')).toBe('error');
+    expect(record('adapter_close')).toMatch(/plain string/);
   });
 });

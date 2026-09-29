@@ -1,5 +1,4 @@
-import { BaseAdapter, positiveInt } from '../core/base-adapter.js';
-import { logError } from '../core/logging.js';
+import { BaseAdapter, positiveInt, logCloseFailure } from '../core/base-adapter.js';
 import { RedisSchemaAdapter } from '../core/schema.js';
 
 /**
@@ -445,16 +444,10 @@ export class RedisAdapter extends BaseAdapter {
     try {
       await client.quit();
     } catch (err) {
-      // A client that never opened, or a socket that already dropped, has nothing
-      // left to report. What is left is worth a real record: it is attributable,
-      // it is masked by the same rules as every other line, and the error object
-      // is kept, which is what makes "ANYDB_DEBUG=1 for a stack trace" true.
-      if (!this.aborted && !/closed|not connected/i.test(err.message || '')) {
-        try {
-          logError('adapter_close', err, { adapter: 'redis' });
-        } catch {
-          // Degraded logging is still better than a close() that throws.
-        }
+      try {
+        logCloseFailure('redis', err, { aborted: this.aborted });
+      } catch {
+        // Degraded logging is still better than a close() that throws.
       }
     }
   }

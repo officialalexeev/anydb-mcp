@@ -9,6 +9,28 @@ Release links for every version are at the bottom of this file.
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-09-29
+
+### Fixed
+
+- **A `close()` on an already-closed connection was logged at `error`, with a
+  stack trace.** The cache evicts an entry and disposes it, and a caller holding
+  the same adapter can close it again, so "pool is closed" and "client is closed"
+  are ordinary rather than exceptional. Every eviction put a multi-line stack on
+  stderr, where an MCP host captures and keeps it. The four drivers word the
+  refusal differently and only `redis.js` filtered for it, so the rest logged a
+  normal teardown as a fault. One `logCloseFailure` in `base-adapter.js` now
+  decides the level for all five: a connection that is already gone, and a close
+  after `abort()`, go to `debug`; anything else is still an `error`.
+- **An ignored URI parameter was logged at `error`.** `?charset=utf8mb4` that
+  this server does not honour is worth a warning, not a fault -- the connection
+  works. MySQL and SQLite now report it at `warn`.
+
+Nothing else changed. The 3.0.0 tool surface, the read-only guard and the five
+tools are as they were.
+
+## [3.0.0]
+
 ### Security
 
 - **A dollar-quoted PostgreSQL string body could hide a second statement, and the
@@ -922,7 +944,8 @@ produced one.
 
 ---
 
-[Unreleased]: https://github.com/officialalexeev/anydb-mcp/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/officialalexeev/anydb-mcp/compare/v3.0.1...HEAD
+[3.0.1]: https://github.com/officialalexeev/anydb-mcp/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/officialalexeev/anydb-mcp/compare/v2.0.4...v3.0.0
 [2.0.4]: https://github.com/officialalexeev/anydb-mcp/compare/v2.0.3...v2.0.4
 [2.0.3]: https://github.com/officialalexeev/anydb-mcp/compare/v2.0.2...v2.0.3

@@ -1,5 +1,5 @@
-import { BaseAdapter, TimeoutError, positiveInt } from '../core/base-adapter.js';
-import { logError } from '../core/logging.js';
+import { BaseAdapter, TimeoutError, positiveInt, logCloseFailure } from '../core/base-adapter.js';
+import { log } from '../core/logging.js';
 import { callbackWithTimeout, createTimeoutController } from '../core/timeout-utils.js';
 import { SQLiteSchemaAdapter } from '../core/schema.js';
 
@@ -297,13 +297,13 @@ export class SQLiteAdapter extends BaseAdapter {
    */
   warnUnsupported(names) {
     try {
-      logError(
-        'sqlite_uri_param_ignored',
-        new Error(
-          `SQLite URI parameter(s) not honoured and ignored: ${names.join(', ')}. `
-          + 'Honoured: mode (ro/rw/rwc), immutable, cache (shared/private).'
-        ),
-        { adapter: 'sqlite' }
+      // A warning, not an error. The connection works; the operator wants to know
+      // a parameter they wrote is not doing anything.
+      log(
+        `SQLite URI parameter(s) not honoured and ignored: ${names.join(', ')}. `
+        + 'Honoured: mode (ro/rw/rwc), immutable, cache (shared/private).',
+        { adapter: 'sqlite' },
+        { level: 'warn', event: 'sqlite_uri_param_ignored' }
       );
     } catch {
       // Degraded logging must not fail a connection.
@@ -585,10 +585,9 @@ export class SQLiteAdapter extends BaseAdapter {
       'SQLite close'
     ).catch(err => {
       // The result has already been produced, so a stuck close is not worth
-      // failing the request over. The stack is kept, which is what makes
-      // "ANYDB_DEBUG=1 for a stack trace" true on this path.
+      // failing the request over.
       try {
-        logError('adapter_close', err, { adapter: 'sqlite' });
+        logCloseFailure('sqlite', err, { aborted: this.aborted });
       } catch {
         // Degraded logging is still better than a close() that throws.
       }

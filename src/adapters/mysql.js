@@ -1,5 +1,5 @@
-import { BaseAdapter, positiveInt } from '../core/base-adapter.js';
-import { logError } from '../core/logging.js';
+import { BaseAdapter, positiveInt, logCloseFailure } from '../core/base-adapter.js';
+import { log } from '../core/logging.js';
 import { MySQLSchemaAdapter } from '../core/schema.js';
 
 // Concurrent statements one cached connection may have in flight. Small on
@@ -235,13 +235,14 @@ export class MySQLAdapter extends BaseAdapter {
    */
   warnUnsupported(names) {
     try {
-      logError(
-        'mysql_uri_param_ignored',
-        new Error(
-          `MySQL URI parameter(s) not honoured and ignored: ${names.join(', ')}. `
-          + `Honoured: ${[...HONOURED_PARAMS].sort().join(', ')}.`
-        ),
-        { adapter: 'mysql' }
+      // A warning, not an error. The connection works; the operator wants to
+      // know a parameter they wrote is not doing anything, and `error` reads as
+      // though the connection failed.
+      log(
+        `MySQL URI parameter(s) not honoured and ignored: ${names.join(', ')}. `
+        + `Honoured: ${[...HONOURED_PARAMS].sort().join(', ')}.`,
+        { adapter: 'mysql' },
+        { level: 'warn', event: 'mysql_uri_param_ignored' }
       );
     } catch {
       // Degraded logging must not fail a connection.
@@ -487,11 +488,8 @@ export class MySQLAdapter extends BaseAdapter {
     try {
       await ending;
     } catch (err) {
-      // Through the logger rather than console.error: attributable, masked by the
-      // same rules as every other record, and the error object survives, which
-      // is what makes "ANYDB_DEBUG=1 for a stack trace" true on the abort path.
       try {
-        logError('adapter_close', err, { adapter: 'mysql' });
+        logCloseFailure('mysql', err, { aborted: this.aborted });
       } catch {
         // Degraded logging is still better than a close() that throws.
       }
