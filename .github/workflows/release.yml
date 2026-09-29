@@ -95,13 +95,23 @@ jobs:
     - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version: 22.x
-        registry-url: https://registry.npmjs.org
-        # No cache in the publish job. npm's guidance is explicit that a release
-        # build should not use the package-manager cache, and the reason is the
-        # failure mode: a cached tree from an earlier commit, a lockfile that no
-        # longer matches it, and a tarball built from neither. The verify job
-        # above caches freely because a stale tree there costs a red test rather
-        # than a published release.
+        # No `registry-url` here, and that is load-bearing.
+        #
+        # `registry-url` makes setup-node write a project `.npmrc` containing
+        # `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}`. With no token in
+        # the environment that line is written with an *empty* value, npm then
+        # believes it has a credential, and it never reaches for the OIDC exchange
+        # that trusted publishing depends on. The symptom is exactly what this job
+        # produced: E404 on PUT, which is npm's way of saying "I could not
+        # authenticate" rather than "this version exists".
+        #
+        # Nothing in this job needs the registry configured -- there are no private
+        # dependencies -- and the default registry is npmjs.org anyway.
+        #
+        # No cache either, per npm's guidance for a release build: a cached tree
+        # from an earlier commit is how a tarball gets built from neither the
+        # lockfile nor the checkout. The verify job above caches freely, because a
+        # stale tree there costs a red test rather than a published release.
         #
         # Which is why the install below is a plain `npm ci` and not a cache
         # restore. It is not optional: `npm publish` runs `prepublishOnly`, which
@@ -175,7 +185,11 @@ jobs:
       # behind a sign-in.
       run: |
         set -o pipefail
-        npm publish --provenance --access public 2>&1 | tee publish.log
+        # Belt and braces for the `.npmrc` note above: if anything in the image or
+        # the repository set a token, npm would use it and skip the OIDC exchange
+        # that is the whole point. An empty value is the documented way to say
+        # "there is no token here".
+        NODE_AUTH_TOKEN= npm publish --provenance --access public 2>&1 | tee publish.log
     - name: Surface what npm said
       # `npm error` only. The tarball listing is dozens of `npm notice` lines
       # ahead of the failure, and including them pushed the reason off the end of
