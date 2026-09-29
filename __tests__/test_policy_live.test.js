@@ -452,7 +452,9 @@ describeIfLive('mongodb', () => {
     const found = report.collections.find((entry) => entry.name === COLLECTION);
     expect(report.database).toBe('mongodb');
     expect(found).toBeDefined();
-    expect(found.documentCount ?? found.count).toBeGreaterThan(0);
+    // The field is `documents`, matching what test_schema.test.js:1290 pins.
+    // `count` is the db_query action's row field, a different envelope.
+    expect(found.documents).toBeGreaterThan(0);
   });
 
   test('insert returns the ids the driver reported', async () => {
@@ -537,11 +539,23 @@ describeIfLive('mongodb', () => {
     }
   });
 
-  test('a write with readOnly:false but no allowDestructive is refused', async () => {
-    // `classifiesAsDestructive` counts every MongoDB write as destructive, so
-    // the second gate applies to all eleven actions' write half.
+  test('a data write needs only readOnly:false, not allowDestructive', async () => {
+    // `classifiesAsDestructive` covers only the actions that change a
+    // collection's shape or existence -- drop, dropDatabase, create,
+    // createIndex. An insert is a data write, and the read-only gate is what it
+    // is supposed to need, identically to every SQL backend. Counting MongoDB
+    // writes as destructive was reverted deliberately; policy.test.js:894-900
+    // pins the current rule, and the comment here used to describe the old one.
     await expect(mongo('{"email":"y@example.com"}', { readOnly: false, action: 'insert', timeout: 30000 }))
-      .rejects.toMatchObject({ kind: 'policy', code: 'DESTRUCTIVE' });
+      .resolves.toBeDefined();
+  });
+
+  test('a shape-changing action still needs allowDestructive', async () => {
+    // The other half of the gate above, so that the rule is pinned from both
+    // sides rather than only relaxed.
+    await expect(mongo('{}', {
+      ...WRITING, action: 'drop', collection: 'anydb_live_drop', timeout: 30000
+    })).rejects.toMatchObject({ kind: 'policy', code: 'DESTRUCTIVE' });
   });
 
   test('server-side JavaScript is refused even with both gates set', async () => {
@@ -552,14 +566,23 @@ describeIfLive('mongodb', () => {
     })).rejects.toMatchObject({ kind: 'policy', code: 'CODE_EXECUTION' });
   });
 
-  test('a statement the server refuses comes back with the driver code', async () => {
-    // `26` is `NamespaceNotFound`. Numeric, and it was thrown away by
-    // `describeMongoError` until the adapter kept the code and the `cause`.
-    const error = await errorFrom(mongo('{}', {
-      action: 'find', collection: 'anydb_live_absent', timeout: 30000
+  test('a statement the server refuses comes back with a numeric code', async () => {
+    // An unknown query operator. The original test asked a `find` against a
+    // missing collection to fail with NamespaceNotFound (26), but MongoDB does
+    // not error there: find, count, distinct and aggregate all return nothing
+    // for a namespace that does not exist, and only insert/update create one.
+    // The premise was not reachable, so no adapter could have satisfied it.
+    //
+    // The point of the test is that a server-side refusal keeps its numeric
+    // code and its `cause` on the way out, which is what the two assertions
+    // below check. The specific number is deliberately not pinned: it is a
+    // server detail, and pinning it would make this fail on a server upgrade
+    // for a reason that has nothing to do with the adapter.
+    const error = await errorFrom(mongo('{"email":{"$bogus":1}}', {
+      action: 'find', collection: COLLECTION, timeout: 30000
     }));
     expect(error.kind).toBe('database');
-    expect(String(error.code)).toMatch(/26/);
+    expect(typeof error.code).toBe('number');
   });
 
   test('a MongoDB explain returns the planner output without running the find', async () => {
@@ -623,9 +646,12 @@ describeIfLive('redis', () => {
   test('db_schema reports the keyspace', async () => {
     const report = reportOf(await registry.describe(uri, { timeout: 30000 }));
     expect(report.database).toBe('redis');
-    // Keyspace statistics, and a key we just wrote has to be in one of them.
-    expect(Array.isArray(report.keyspace)).toBe(true);
-    expect(JSON.stringify(report.keyspace)).toContain('anydb:live:probe');
+    // `keyspace` is a map of per-database counts, not a list, and it never
+    // carries key names -- test_schema.test.js:1507 pins that exact shape. The
+    // key we just wrote has to show up in the counts, and its name has to show
+    // up in `sampleKeys`, which is the field that lists them.
+    expect(report.keyspace.db0.keys).toBeGreaterThan(0);
+    expect(report.sampleKeys).toContain(KEY);
   });
 
   test('a write behind both gates is readable afterwards', async () => {
@@ -655,15 +681,20 @@ describeIfLive('redis', () => {
     await expect(redis('SELECT 1', WRITING)).rejects.toThrow(/connection state/);
   });
 
-  test('a command the server refuses comes back with the driver code', async () => {
-    // `WRONGTYPE`: a GET against a key holding a list. node-redis puts the code
-    // on the error, and `redis.js`'s `describeError` keeps it, which is what lets
-    // the registry answer without reading English.
+  test('a command the server refuses comes back as a database error', async () => {
+    // `WRONGTYPE`: a GET against a key holding a list.
+    //
+    // On the message, not on `error.code`. node-redis 6.x builds server replies
+    // into a `SimpleError` straight from the wire string and sets no `code` on
+    // it, so there is nothing for the adapter to copy; `code` is documented as
+    // optional (tools.js, README) and node-redis only supplies one for socket
+    // failures like ECONNREFUSED. The server's word still has to survive, so
+    // that is what is asserted.
     await redis(`DEL ${KEY}:list`, WRITING);
     await redis(`RPUSH ${KEY}:list a b`, WRITING);
     const error = await errorFrom(redis(`GET ${KEY}:list`));
     expect(error.kind).toBe('database');
-    expect(String(error.code)).toMatch(/WRONGTYPE/);
+    expect(error.message).toMatch(/WRONGTYPE/);
     await redis(`DEL ${KEY}:list`, WRITING);
   });
 
