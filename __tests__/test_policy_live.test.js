@@ -551,10 +551,13 @@ describeIfLive('mongodb', () => {
   });
 
   test('a shape-changing action still needs allowDestructive', async () => {
-    // The other half of the gate above, so that the rule is pinned from both
-    // sides rather than only relaxed.
+    // The other half of the gate above, so the rule is pinned from both sides
+    // rather than only relaxed. `WRITING` is deliberately not used here: it
+    // carries `allowDestructive: true`, which is the point of this case. The
+    // refusal happens in the policy layer, before a socket is opened, so the
+    // collection does not have to exist.
     await expect(mongo('{}', {
-      ...WRITING, action: 'drop', collection: 'anydb_live_drop', timeout: 30000
+      readOnly: false, action: 'drop', collection: 'anydb_live_drop', timeout: 30000
     })).rejects.toMatchObject({ kind: 'policy', code: 'DESTRUCTIVE' });
   });
 
