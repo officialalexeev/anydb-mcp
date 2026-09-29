@@ -10,8 +10,7 @@
 #     symptom.
 #   - `src/index.js` is a `bin`, with a shebang. A CRLF shebang is `/usr/bin/env
 #     node\r` on Linux and macOS: "bad interpreter", and the installed package
-#     does not start. `scripts/verify-package.mjs` now asserts the file has no
-#     `\r` for exactly this reason.
+#     does not start.
 #   - Every generated artefact — the tarball, a lockfile diff, a `.tgz` checksum —
 #     is byte-sensitive, and CRLF is the kind of difference that is invisible in
 #     review and visible in a checksum.
@@ -24,21 +23,31 @@
 # line-ending-damaged on its way into the index. A tarball mended by git is a
 # tarball npm cannot install.
 #
-# A NOTE ON THE FIVE CRLF FILES ALREADY IN THE TREE
-# --------------------------------------------------
-# Five of the forty-three tracked files are CRLF in the index today
-# (`CHANGELOG.md`, `package-lock.json`, `package.json`, `src/adapters/mongodb.js`,
-# `src/core/schema.js`) and thirty-eight are LF. This file does not fix that, on
-# purpose: `git add --renormalize .` rewrites every tracked file, which turns a
-# one-line configuration change into a whole-repository diff and buries the real
-# change. It has to be a separate commit, on its own, so that `git log -p` on the
-# next change is readable:
+# THIS IS NOT NORMALISED AT COMMIT TIME, AND THAT IS THE POINT
+# -----------------------------------------------------------
+# Every tracked file in the index is LF today. That is not an accident of this
+# file: it is what `text` means, and it is why `git add --renormalize .` has
+# nothing left to do here. An earlier revision of this comment claimed five
+# files were still CRLF in the index and told the next maintainer to run that
+# command; the index had no CRLF at all, so the advice was a chore with no effect
+# dressed up as a fix.
 #
-#     git add --renormalize .
-#     git commit -m "chore: normalise line endings to LF"
+# The gap is not in the index, it is between the index and `npm publish`.
+# `text=auto` makes git convert CRLF to LF *when it compares the working tree to
+# the index*, so a file with CRLF on disk reports as clean in `git status`.
+# `npm publish` does not consult the index at all: it packs the working-tree
+# bytes. anydb-mcp@3.0.1 was published that way, and 3.0.2 shipped
+# `src/core/safety.js` with 694 CRLF — from a tree that git considered clean and
+# that no diff would show.
 #
-# until that commit exists, treat this file as the *policy* and the index as still
-# holding the old state.
+# So the policy here is necessary and not sufficient. `scripts/verify-package.mjs`
+# closes the gap by reading the packed tarball rather than the repository, which
+# is the only one of the three views that a consumer can observe.
+#
+# A local `core.autocrlf=true` fights `eol=lf` and leaves `git status` reporting
+# files as modified that `git diff` then shows as identical. It is noise, not a
+# change; `git add` stages nothing. Setting `core.autocrlf=false` for this
+# repository silences it, but nothing depends on it being set either way.
 
 * text=auto eol=lf
 

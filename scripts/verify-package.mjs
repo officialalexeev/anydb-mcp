@@ -70,6 +70,7 @@ import { existsSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gunzipSync } from 'node:zlib';
 
 const exec = promisify(execFile);
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -454,6 +455,117 @@ const wanted = process.argv.find(a => a.startsWith('--version='))?.slice('--vers
  */
 const allowMissingSqlite = process.env.ANYDB_VERIFY_ALLOW_MISSING_SQLITE === '1';
 
+// ---------------------------------------------------------------------------
+// Reading a .tgz
+// ---------------------------------------------------------------------------
+//
+// Just enough tar to answer "what bytes are in here". No dependency: the format
+// is 512-byte headers and zlib is in Node already, and adding a tar package to a
+// project for one verification check would be a poor trade.
+//
+// Returns the regular files with their data. Anything it cannot parse is
+// reported rather than skipped, because a reader that silently returns nothing
+// would make the CRLF check below pass on an empty list -- the same failure this
+// file has been written to avoid twice already.
+const TAR_BLOCK = 512;
+
+const tarOctal = (buf, offset, length) => {
+  const raw = buf.toString('ascii', offset, offset + length).replace(/\0.*$/, '').trim();
+  return raw === '' ? 0 : Number.parseInt(raw, 8);
+};
+
+const tarString = (buf, offset, length) =>
+  buf.toString('utf8', offset, offset + length).replace(/\0.*$/, '');
+
+function readTar(buf) {
+  const files = [];
+  let offset = 0;
+  let pendingName = null;
+
+  while (offset + TAR_BLOCK <= buf.length) {
+    const header = buf.subarray(offset, offset + TAR_BLOCK);
+    // Two zero blocks end the archive; the rest is padding.
+    if (header.every((byte) => byte === 0)) break;
+
+    const name = tarString(header, 0, 100);
+    const size = tarOctal(header, 124, 12);
+    const type = String.fromCharCode(header[156] || 0x30);
+    const prefix = tarString(header, 345, 155);
+    offset += TAR_BLOCK;
+
+    const data = buf.subarray(offset, offset + size);
+    offset += Math.ceil(size / TAR_BLOCK) * TAR_BLOCK;
+
+    // A name too long for the header arrives as its own entry first: GNU 'L', or
+    // a pax 'x' header carrying `path=`. npm's tarballs use the latter.
+    if (type === 'L') { pendingName = data.toString('utf8').replace(/\0.*$/, ''); continue; }
+    if (type === 'x' || type === 'g') {
+      const pax = data.toString('utf8').match(/(?:^|\n)\d+ path=([^\n]*)\n/);
+      if (pax) pendingName = pax[1];
+      continue;
+    }
+    if (type === '5' || type === '1' || type === '2') { pendingName = null; continue; }
+
+    const path = pendingName ?? (prefix ? `${prefix}/${name}` : name);
+    pendingName = null;
+    if (type === '0' || type === '\0') files.push({ path, data });
+  }
+
+  return files;
+}
+
+const countCrlf = (data) => {
+  let n = 0;
+  for (let i = 0; i < data.length - 1; i++) if (data[i] === 13 && data[i + 1] === 10) n++;
+  return n;
+};
+
+/**
+ * CRLF anywhere in the tarball, counted per file.
+ *
+ * Reads the locally packed tarball, or the registry's when verifying a published
+ * version -- the bytes the version under test actually consists of. Text is
+ * detected by the absence of a NUL byte, the same test the secret scan uses, so
+ * there is no extension list to fall out of date.
+ */
+async function crlfReport() {
+  let gz;
+  let unreadable = null;
+
+  if (tarball) {
+    gz = await readFile(tarball);
+  } else {
+    const viewed = await tryNpm(['view', spec, 'dist.tarball'], root, 120000);
+    if (!viewed.ok) {
+      return { files: [], scanned: 0, unreadable: `${spec} dist.tarball` };
+    }
+    const url = viewed.stdout.trim();
+    const res = await fetch(url);
+    if (!res.ok) {
+      return { files: [], scanned: 0, unreadable: `${url} (HTTP ${res.status})` };
+    }
+    gz = Buffer.from(await res.arrayBuffer());
+  }
+
+  let tar;
+  try {
+    tar = readTar(gunzipSync(gz));
+  } catch (e) {
+    return { files: [], scanned: 0, unreadable: `the tarball would not decompress (${e.message})` };
+  }
+  if (tar.length === 0) unreadable = 'the tarball decoded to no files';
+
+  const files = [];
+  let scanned = 0;
+  for (const file of tar) {
+    if (file.data.length === 0 || file.data.includes(0)) continue;
+    scanned++;
+    const count = countCrlf(file.data);
+    if (count > 0) files.push({ path: file.path.replace(/^package\//, ''), count });
+  }
+  return { files, scanned, unreadable };
+}
+
 let version;
 let tarball = null;
 let spec;
@@ -551,6 +663,30 @@ try {
   const smuggled = paths.filter(p => MUST_NOT_MATCH.some(({ pattern }) => pattern.test(p)));
   check('no test, CI, coverage, dotenv or repository file is in the tarball', smuggled.length === 0,
     smuggled.length ? smuggled.join(', ') : 'files allowlist honoured');
+
+  // -------------------------------------------------------------------------
+  // The bytes, not the file list
+  // -------------------------------------------------------------------------
+  //
+  // Everything above reads the *repository*. That is the wrong place to look for
+  // a line-ending problem, and the reason is `.gitattributes`: `* text=auto
+  // eol=lf` makes git normalise CRLF to LF when it compares the working tree to
+  // the index, so a file that has CRLF on disk reports as clean in `git status`.
+  // `npm publish` then packs the working-tree bytes anyway. 3.0.1 was published
+  // that way, and 3.0.2 shipped `src/core/safety.js` with 694 CRLF that no check
+  // in this file could see, because the one CRLF check here looked only at
+  // `src/index.js` and only at the local copy.
+  //
+  // So this reads the tarball. That is the artefact npm serves, it is the same
+  // in CI and on a maintainer's machine, and it is the only one of the three
+  // that a consumer can observe.
+  console.log('\npacked bytes');
+  const crlf = await crlfReport();
+  check('no packed file has CRLF line endings', crlf.files.length === 0,
+    crlf.files.length
+      ? crlf.files.map(f => `${f.path} (${f.count})`).join('; ')
+      : `${crlf.scanned} text file(s) read out of the tarball, LF only`);
+  if (crlf.unreadable) note(`tarball could not be read, so unscanned: ${crlf.unreadable}`);
 
   // -------------------------------------------------------------------------
   // The secret scan

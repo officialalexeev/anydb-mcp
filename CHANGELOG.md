@@ -9,6 +9,25 @@ Release links for every version are at the bottom of this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **CRLF line endings could ship inside the published package.** `.gitattributes`
+  sets `text=auto`, which makes git convert CRLF to LF when it compares the
+  working tree to the index, so a file that has CRLF on disk reports as clean in
+  `git status`. `npm publish` does not read the index; it packs working-tree
+  bytes. `anydb-mcp@3.0.1` was published that way, and `3.0.2` shipped
+  `src/core/safety.js` with 694 CRLF — from a tree that no diff would show as
+  changed. `verify-package.mjs` now reads the packed tarball and rejects any
+  shipped text file containing a carriage return, which is the only one of the
+  three views (index, working tree, tarball) that a consumer can observe.
+
+### Changed
+
+- The `v3.0.1` tag was added after the fact, on `68c70f3`, which is the commit
+  the published 3.0.1 was built from. Verified against the registry rather than
+  assumed: 30 of its 31 files are byte-identical to that commit, and the 31st
+  differs only in the line endings above. The tag annotation records both facts.
+
 ## [3.0.3] - 2026-09-29
 
 > No action needed. This release exists to prove the release pipeline end to end:
