@@ -138,7 +138,14 @@ async function drive(backend, uri) {
       const inserted = await registry.run(uri, backend.write, {
         ...policy, readOnly: false, collection: backend.collection, action: 'insert',
       });
-      check(`${backend.name}: insert returns an id`, Boolean(rowsOf(inserted)[0]?.insertedId));
+      // `insertedIds` is MongoDB's spelling and is a map of index to id; the
+      // singular `insertedId` is what the SQL adapters return, so a check written
+      // for one does not see the other.
+      const row = rowsOf(inserted)[0] || {};
+      check(`${backend.name}: insert returns an id`,
+        row.acknowledged === true && row.insertedCount > 0
+        && Object.keys(row.insertedIds || {}).length === row.insertedCount,
+        JSON.stringify(row).slice(0, 60));
     } else {
       const written = await registry.run(uri, backend.write, {
         ...policy, params: backend.params, readOnly: false, allowDestructive: backend.destructive,

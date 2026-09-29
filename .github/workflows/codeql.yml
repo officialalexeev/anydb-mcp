@@ -45,8 +45,26 @@ jobs:
 
     strategy:
       fail-fast: false
+      # The two languages get different path restrictions, so the configuration is
+      # per leg rather than shared. `src/` is the right scope for the source
+      # analysis and the wrong one for actions: an action analysis with its paths
+      # pinned to `src` has no workflow file to read, and CodeQL reports the
+      # language as unrecognised rather than as empty.
       matrix:
-        language: [ 'javascript-typescript', 'javascript-actions' ]
+        include:
+          - language: javascript-typescript
+            config: |
+              paths:
+                - src
+              paths-ignore:
+                - '**/*.test.js'
+                - '__tests__'
+                - coverage
+                - node_modules
+          - language: javascript-actions
+            config: |
+              paths:
+                - .github/workflows
 
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -55,18 +73,10 @@ jobs:
       uses: github/codeql-action/init@416ff0dea110f80f0f56f0046500dbf7420e4bb0 # v2.27.1
       with:
         languages: ${{ matrix.language }}
-        # `src/` only. The jest configuration, the babel configuration and the
-        # verification script are build inputs, and CodeQL's JavaScript extractor
-        # has nothing to say about them; scanning them produces findings nobody
-        # can act on.
-        config: |
-          paths:
-            - src
-          paths-ignore:
-            - '**/*.test.js'
-            - '__tests__'
-            - coverage
-            - node_modules
+        # The jest configuration, the babel configuration and the verification
+        # script are build inputs, and CodeQL's JavaScript extractor has nothing
+        # to say about them; scanning them produces findings nobody can act on.
+        config: ${{ matrix.config }}
 
     - name: Perform CodeQL analysis
       uses: github/codeql-action/analyze@416ff0dea110f80f0f56f0046500dbf7420e4bb0 # v2.27.1
