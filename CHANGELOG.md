@@ -23,6 +23,20 @@ Release links for every version are at the bottom of this file.
 
 ### Changed
 
+- `redis-cluster://` and `redis-sentinel://` are refused by the connection
+  policy. They were allowed, documented and unit-tested, and had never worked:
+  `redis@6` cannot answer a command through either topology. Measured against a
+  real three-master cluster and a real master + replica + sentinel set, with a
+  probe that has no code of this package in the path — `createCluster` connects,
+  reports `masters=3`, and fails every `sendCommand` with a `TypeError` because
+  it routes by slot and a keyless command has none; `createSentinel` connects and
+  then asks the *master* for the sentinel list, which answers `ERR unknown
+  command 'SENTINEL'`. What the schemes produced instead was three different
+  failures for one cause. The adapter code stays and is correct — the option
+  names the driver reads, the required `sentinelRootNodes`, and credentials split
+  between the sentinels and the master/replicas — so re-enabling is two list
+  entries once the driver can serve them. `scripts/probe-redis-driver.mjs` is how
+  you find out.
 - The `v3.0.1` tag was added after the fact, on `68c70f3`, which is the commit
   the published 3.0.1 was built from. Verified against the registry rather than
   assumed: 30 of its 31 files are byte-identical to that commit, and the 31st

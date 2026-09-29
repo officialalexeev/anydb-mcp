@@ -286,36 +286,30 @@ describe('RedisAdapter', () => {
           .rejects.toThrow('not supported by this build of the redis driver');
       });
 
-      // The two schemes above were unreachable, and this is the e2e proof of it
+      // The two schemes are refused by policy, and this is the e2e proof of it
 
       test.each(['redis-cluster', 'redis-sentinel'])(
-        '%s:// is admitted by the connection policy, which is what made the code above reachable',
+        '%s:// is refused by the connection policy, with a reason that names the driver',
         async (scheme) => {
-  // `checkConnectionPolicy` reads the scheme allowlist before anything else, so
-  // without an entry in `DEFAULT_ALLOWED_SCHEMES` the connection was refused there
-  // and `RedisAdapter.connect()` was never called. That is why `createCluster` and
-  // `createSentinel` had coverage and no caller: the capability was implemented,
-  // documented, tested, and dead.
+          // Was the opposite until 3.0.4, and the reason it was allowed is the
+          // reason it now cannot be: the adapter implemented both and had no
+          // caller, because the allowlist refused them first. redis@6 turned out
+          // not to be able to serve either topology, and a refusal is more useful
+          // than three different failures for one cause.
           const verdict = await checkConnectionPolicy(`${scheme}://:pw@node.internal:7000/mymaster`, {
             env: { ANYDB_ALLOW_PRIVATE_HOSTS: '1' },
           });
 
-          expect(verdict.allowed).toBe(true);
-          expect(verdict.reason).toBe('');
-          expect(DEFAULT_ALLOWED_SCHEMES).toContain(scheme);
-          // And the guard has to be the Redis one, not a refusal for a protocol
-          // it cannot verify — which is what an un-collapsed scheme produced.
-          expect(baseProtocol(scheme)).toBe('redis');
-          expect(inspectQuery(scheme, 'GET k').safe).toBe(true);
-          expect(inspectQuery(scheme, 'SET k v').safe).toBe(false);
+          expect(verdict.allowed).toBe(false);
+          expect(verdict.reason).toMatch(/not supported|not allowed|scheme/i);
+          expect(DEFAULT_ALLOWED_SCHEMES).not.toContain(scheme);
         }
       );
 
-      test('the registry routes both schemes to this adapter', () => {
+      test('the registry does not route either scheme any more', () => {
         const registry = new AdapterRegistry({ env: {} });
         for (const scheme of ['redis-cluster', 'redis-sentinel']) {
-          expect(typeof registry.mapping[scheme]).toBe('function');
-          expect(registry.createAdapter(scheme, 1000).constructor.name).toBe('RedisAdapter');
+          expect(typeof registry.mapping[scheme]).toBe('undefined');
         }
       });
     });

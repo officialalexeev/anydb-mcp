@@ -60,7 +60,14 @@ export const ROUTES = Object.freeze([
   }),
   Object.freeze({
     driver: 'redis',
-    schemes: Object.freeze(['redis', 'rediss', 'redis-cluster', 'redis-sentinel']),
+    // `redis-cluster` and `redis-sentinel` were here until 3.0.4. The adapter
+    // still implements them, and correctly, but `redis@6` cannot serve a command
+    // from either topology - a cluster routes by slot and a keyless command has
+    // none, and a sentinel set asks the master for the sentinel list. Measured
+    // with no code of ours in the path; see DEFAULT_ALLOWED_SCHEMES for the
+    // output. Kept out of both lists so the scheme is refused once, with one
+    // sentence, instead of reaching a driver that will fail three different ways.
+    schemes: Object.freeze(['redis', 'rediss']),
   }),
 ]);
 

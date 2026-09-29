@@ -293,81 +293,63 @@ jobs:
         grep -E '^[[:space:]]*FAIL' verify-package.log | head -20 | \
           sed 's/^[[:space:]]*/::error::/' || true
 
-  # Redis Cluster and Redis Sentinel, against real ones.
+  # `redis-cluster://` and `redis-sentinel://` were allowed here until 3.0.4 and
+  # this job is why that is now known.
   #
-  # Its own job because `services:` maps one container to one port, and neither
-  # of these is one container: a cluster is three masters, a sentinel set is a
-  # master, a replica and a sentinel. The script starts them with
-  # `--network host` so the addresses the nodes agree on and the addresses the
-  # client dials are the same 127.0.0.1.
+  # It found, against real topologies and with a probe that has no code of ours in
+  # the path, that redis@6 cannot answer a command through either: a cluster
+  # client connects, discovers masters=3, and fails every sendCommand with
+  # "TypeError: Cannot read properties of undefined (reading 'forEach')" because
+  # it routes by slot and a keyless command has no slot; a sentinel set connects
+  # and asks the master for the sentinel list, which answers "ERR unknown command
+  # 'SENTINEL'". The adapter's own bugs underneath that - option names the driver
+  # does not read, a required `sentinelRootNodes` missing, a root node shaped from
+  # the type declaration rather than from what the client reads - are fixed and
+  # covered by unit tests that hand the options to the real factory.
   #
-  # This job is here because the sentinel path was broken and nothing could see
-  # it. `connectCluster` passed `sentinel` and `nodeClient` to `createSentinel` -
-  # names this driver version does not read - and left out `sentinelRootNodes`,
-  # which is required, so the real factory threw while reading an undefined list.
-  # The unit tests passed because they assert against a mock, and a mock records
-  # whatever it is handed: it cannot tell you a field does not exist. Only the
-  # driver can, and only against a real topology.
-  redis-topologies:
-    name: redis topologies
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-      with:
-        node-version: 22.x
-        cache: 'npm'
-    - run: npm ci
-
-    - name: Start the cluster and the sentinel set
-      run: bash scripts/ci-redis-topologies.sh up redis-topologies.env
-
-    # Before the adapter, and with none of its code in the path: both topologies
-    # are currently failing with a TypeError from inside node-redis on the first
-    # command, and the useful thing to know is which of the two layers is at
-    # fault. This answers that on its own and prints the answer either way, so
-    # the job stops guessing.
-    - name: Probe the driver directly
-      run: |
-        set -a
-        . ./redis-topologies.env
-        set +a
-        node scripts/probe-redis-driver.mjs
-
-    - name: Drive them through the adapter
-      # `pipefail` so a failing test fails the step, and the log is teed for the
-      # step below to turn into annotations.
-      #
-      # `--forceExit` is here because the run otherwise never ends: a client that
-      # has been told to close but has not finished disconnecting keeps the event
-      # loop alive, jest waits for it, and the step sits until the job's own
-      # timeout - which is what happened for several runs, with the test results
-      # lost because annotations are only published when a step finishes. Forcing
-      # the exit gets the results reported. Whether the handle is a leak in the
-      # adapter or in the driver is a separate question this does not pretend to
-      # answer; the teardown step below is `always()` either way.
-      run: |
-        set -o pipefail
-        set -a
-        . ./redis-topologies.env
-        set +a
-        npx jest --forceExit __tests__/test_redis_topologies_live.test.js 2>&1 \
-          | tee redis-topologies.log
-
-    - name: Surface what failed
-      if: failure()
-      run: |
-        {
-          echo "::error title=redis topologies failed::see below"
-          grep -E '●|Cannot|Error:' redis-topologies.log | head -20 | \
-            sed 's/^/::error::/' || true
-        }
-
-    # `always()`, and after the tests: a job that fails must not leave six
-    # containers behind, because the next job on the same host would find the
-    # ports taken and fail for the wrong reason.
-    - name: Stop the cluster and the sentinel set
-      if: always()
-      run: bash scripts/ci-redis-topologies.sh down
+  # The schemes are refused by policy now, so there is nothing here for CI to
+  # gate on, and a job that cannot pass is worse than no job: it is a permanent red
+  # that trains everyone to ignore red.
+  #
+  # What is kept, and what to do when the driver is fixed:
+  #   scripts/ci-redis-topologies.sh   starts a three-master cluster and a
+  #                                    master + replica + sentinel set
+  #   scripts/probe-redis-driver.mjs   drives both clients directly, with none of
+  #                                    our adapter code in the path
+  # Run them on any machine with Docker, or paste this job back into ci.yml once
+  # the driver can serve a keyless command and a sentinel topology refresh. Both
+  # files are read-only diagnostics and are not part of the published package.
+  #
+  # redis-topologies:
+  #   name: redis topologies
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 20
+  #   steps:
+  #   - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+  #   - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+  #     with:
+  #       node-version: 22.x
+  #       cache: 'npm'
+  #   - run: npm ci
+  #   - name: Start the cluster and the sentinel set
+  #     run: bash scripts/ci-redis-topologies.sh up redis-topologies.env
+  #   - name: Probe the driver directly
+  #     run: |
+  #       set -a
+  #       . ./redis-topologies.env
+  #       set +a
+  #       node scripts/probe-redis-driver.mjs
+  #   - name: Drive them through the adapter
+  #     # --forceExit because a cluster client that has been told to close and has
+  #     # not finished disconnecting keeps the event loop alive, and the step
+  #     # would sit until the job timeout with the results unpublished.
+  #     run: |
+  #       set -o pipefail
+  #       set -a
+  #       . ./redis-topologies.env
+  #       set +a
+  #       npx jest --forceExit __tests__/test_redis_topologies_live.test.js 2>&1 \
+  #         | tee redis-topologies.log
+  #   - name: Stop the cluster and the sentinel set
+  #     if: always()
+  #     run: bash scripts/ci-redis-topologies.sh down

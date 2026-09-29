@@ -53,14 +53,26 @@ describe('connection schemes', () => {
     }
   });
 
-  test('the Redis topologies the adapter can build are routed and allowed', () => {
-    // `redis.js` builds `createCluster` and `createSentinel` clients for these. With
-    // neither entry, `checkConnectionPolicy` refused the connection before the
-    // adapter was constructed, so the code had no caller at all.
+  test('the Redis topologies are refused, because the driver cannot serve them', () => {
+    // Was the opposite until 3.0.4. `redis.js` builds `createCluster` and
+    // `createSentinel` clients and that code is correct, but redis@6 cannot
+    // answer a command from either topology: a cluster routes by slot and a
+    // keyless command has none, and a sentinel set asks the master for the
+    // sentinel list, which answers "unknown command SENTINEL". Measured with no
+    // code of ours in the path, against real topologies.
+    //
+    // So the scheme is refused here, with one sentence, rather than reaching a
+    // driver that fails three different ways for one cause - a DNS error about a
+    // name that does not exist, a TypeError inside the client, and an
+    // unknown-command reply.
     for (const scheme of ['redis-cluster', 'redis-sentinel']) {
-      expect(routed.has(scheme)).toBe(true);
-      expect(driverFor(scheme)).toBe('redis');
-      expect(DEFAULT_ALLOWED_SCHEMES).toContain(scheme);
+      expect(routed.has(scheme)).toBe(false);
+      expect(DEFAULT_ALLOWED_SCHEMES).not.toContain(scheme);
+    }
+    // The adapter code is kept, so it has to stay constructible: a fixed driver
+    // should not need it rewritten, only enabled.
+    for (const scheme of ['redis-cluster', 'redis-sentinel']) {
+      expect(driverFor(scheme)).not.toBe('redis');
     }
   });
 

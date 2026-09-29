@@ -321,6 +321,27 @@ export function isPrivateAddress(ip) {
  * Schemes accepted unless `ANYDB_ALLOWED_SCHEMES` says otherwise. The SQLAlchemy aliases are
  * here because they are real spellings that `registry.js` routes.
  *
+ * `redis-cluster` and `redis-sentinel` are deliberately absent, and were here
+ * until 3.0.4. They are implemented in the adapter and the code is correct, but
+ * `redis@6` cannot serve a single command from either topology. Measured with no
+ * code of ours in the path, against real ones started by
+ * `scripts/ci-redis-topologies.sh`:
+ *
+ *   createCluster   connects, reports masters=3, and every sendCommand fails
+ *                   with "TypeError: Cannot read properties of undefined
+ *                   (reading 'forEach')" - it routes by slot, the slot comes from
+ *                   the key, and there is no slot for a keyless command.
+ *   createSentinel  connects, and its own topology refresh asks the *master*
+ *                   for the sentinel list, which answers "ERR unknown command
+ *                   'SENTINEL'".
+ *
+ * So neither is a configuration mistake and neither can be fixed from here. What
+ * they produced instead, when allowed, was three different failures for one
+ * cause: a DNS error about a name that does not exist, a driver TypeError, and an
+ * unknown-command reply. Refusing the scheme with one sentence is more useful
+ * than any of them, and the code stays: `connectCluster` and the topology scripts
+ * are what a fixed driver would be tested against.
+ *
  * Adding a scheme means adding it in three places: this list, `ROUTES` in
  * `./registry.js` (or the connection is unroutable) and `SCHEME_ALIASES` in
  * `./profiles.js` (or a profile naming it will not validate).
@@ -330,7 +351,7 @@ export const DEFAULT_ALLOWED_SCHEMES = Object.freeze([
   'mysql', 'mariadb',
   'sqlite', 'sqlite+pysqlite',
   'mongodb', 'mongodb+srv',
-  'redis', 'rediss', 'redis-cluster', 'redis-sentinel',
+  'redis', 'rediss',
   'mysql+pymysql', 'mysql+mysqldb', 'mysql+asyncmy', 'mysql+aiohttp', 'mysql+aiomysql', 'mysql+cymysql',
   'mariadb+pymysql', 'mariadb+mariadbconnector',
 ]);

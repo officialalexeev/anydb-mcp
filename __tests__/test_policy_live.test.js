@@ -717,18 +717,19 @@ describeIfLive('redis', () => {
 
 // The two Redis topologies, which no container here can be
 
-describe('the Redis topologies this job cannot start', () => {
-  // Not under `describeIfLive`: a single-node Redis 7 container is not a cluster
-  // and a sentinel set is three more. Asserted anyway, from the outside, because
-  // the thing that made `createCluster` and `createSentinel` dead was the policy
-  // refusing the scheme before the adapter was constructed.
-  test.each(['redis-cluster', 'redis-sentinel'])(
-    '%s:// is routed, allowed, and reached by the read-only guard',
-    (scheme) => {
-      expect(new AdapterRegistry({ env: {} }).createAdapter(scheme, 1000).constructor.name)
-        .toBe('RedisAdapter');
+// The topologies a `services:` block cannot start. Kept as a statement rather
+// than deleted: this used to assert the opposite - that both schemes were routed,
+// allowed and reached the read-only guard - and that is exactly what made the
+// capability look alive while redis@6 could not serve a command from either
+// topology. The real-topology harness is `scripts/ci-redis-topologies.sh` with
+// `scripts/probe-redis-driver.mjs`, which is what found it.
+describe('the Redis topologies', () => {
+  test('are not routed, because the driver cannot answer through them', () => {
+    const registry = new AdapterRegistry({ env: {} });
+    for (const scheme of ['redis-cluster', 'redis-sentinel']) {
+      expect(typeof registry.mapping[scheme]).toBe('undefined');
     }
-  );
+  });
 });
 
 // The harness itself

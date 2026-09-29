@@ -375,31 +375,35 @@ over the list rather than another edit. `mariadb://` itself was worse: it is a
 work, and it did not route either. `mongodb+srv://` — the connection string almost
 everybody pastes out of Atlas — was rejected outright.
 
-**Redis Cluster and Sentinel are reachable, with one limitation on a cluster.**
-`redis-cluster://` builds a `createCluster` client with `rootNodes`, and
-`redis-sentinel://` builds a `createSentinel` client with the master's name taken
-from the path (`redis-sentinel://:pass@sentinel:26379/mymaster`). Both existed in
-the adapter long before the policy allowlist did, and without a policy entry
-`checkConnectionPolicy` refused the connection before the adapter was ever
-constructed - so the code had no caller. Cluster and Sentinel are ordinary
-production topologies, so the schemes are allowed and routed rather than the code
-deleted. Both are exercised against real topologies on every push; see
-[__tests__/README.md](../__tests__/README.md).
+**Redis Cluster and Sentinel are not supported, and the scheme is refused.**
+`redis-cluster://` and `redis-sentinel://` built `createCluster` and
+`createSentinel` clients, and the code for both is still in `src/adapters/redis.js`
+and is correct: the option names the driver reads, the required `sentinelRootNodes`,
+the root node shape the client actually reads rather than the one its types
+declare, and credentials for the sentinels and the master/replicas separately.
 
-**A cluster client routes by slot, and a command with no key has no slot.** That
-is the driver's design, not a limitation worked around here, and it has two
-consequences on `redis-cluster://` only:
+`redis@6` cannot answer a command through either topology. Measured with no code
+of ours in the path, against a three-master cluster and a master + replica +
+sentinel set started by `scripts/ci-redis-topologies.sh`:
 
-- `db_schema` and `db_health` read node-scoped commands (`INFO`, `SCAN`), so they
-  are issued against one master through the driver's own `nodeClient()`. The
-  `db_schema` answer carries `scope: "one node of a Redis cluster, not the whole
-  cluster"` so a caller comparing it against a cluster total does not read missing
-  keys as a fault. A sentinel set resolves to a single master by construction and
-  is not annotated.
-- `db_query` works for commands that take a key, which is the normal case. A
-  keyless command has nowhere to be routed and is refused by the driver rather
-  than answered; there is no table of which commands those are, because the
-  driver is the one that knows, and guessing would be worse than its answer.
+| | Result |
+|---|---|
+| `createCluster` | connects, reports `masters=3`, and every `sendCommand` fails with `TypeError: Cannot read properties of undefined (reading 'forEach')`. It routes by slot, the slot comes from the key, and a keyless command has no slot. |
+| `createSentinel` | connects, then its own topology refresh asks the *master* for the sentinel list, which answers `ERR unknown command 'SENTINEL'`. |
+
+Neither is fixable from here, and what they produced when allowed was three
+different failures for one cause — a DNS error about a name that does not exist, a
+driver `TypeError`, and an unknown-command reply. So both schemes are out of the
+connection policy and of the registry's routes, and a `redis-cluster://` URI is
+refused with one sentence rather than reaching a driver that cannot serve it.
+`redis://` and `rediss://` are unaffected, and `db_list` still reads profiles that
+name a cluster URI, so an existing config does not stop loading.
+
+To re-enable: `scripts/probe-redis-driver.mjs` drives both clients directly with
+none of the adapter's code in the path, and prints one line per variant. When the
+lines say `OK` rather than the errors above, put the two schemes back into
+`DEFAULT_ALLOWED_SCHEMES` in `src/core/policy.js` and into the redis route in
+`src/core/registry.js`, and the rest is already written and covered.
 
 **One caveat worth knowing before you rely on the SQLAlchemy spellings.**
 `src/adapters/mysql.js` rewrites exactly four `mysql+<dialect>` forms to `mysql://` —
