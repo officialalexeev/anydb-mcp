@@ -1,3 +1,21 @@
+# Node.js CI
+#
+# Four jobs, in the order they tell a story:
+#
+#   1. `test`          -- the suite, on the declared Node floor and on Windows
+#   2. `coverage`      -- the same suite, instrumented once, with a threshold
+#   3. `live`          -- the four non-SQLite databases, which nothing else covers
+#   4. `package`       -- the tarball, installed clean and driven as a consumer
+#
+# What the previous version of this file did not do: it had no `permissions:`
+# block, so every job ran with a token that could write to the repository; no
+# `concurrency:` group, so a stack of pushes ran the whole matrix each time; no
+# `timeout-minutes`, so `server_e2e`'s 30 second `beforeAll` plus a child that
+# hung in `verify-package.mjs` had to be stopped by GitHub's six-hour ceiling
+# instead of by us; and the action tags were mutable, so `actions/checkout@v4`
+# could resolve to a different commit between the run that passed and the run that
+# did not.
+
 name: Node.js CI
 
 on:
@@ -6,50 +24,240 @@ on:
   pull_request:
     branches: [ "main" ]
 
+# Read-only by default, and made explicit. A test run has no reason to write to
+# the repository, to the package registry, or to create an issue, and a
+# compromised test dependency should find a token that cannot do any of it.
+permissions:
+  contents: read
+
+# One run per ref. A new push supersedes the one in flight, which matters most on
+# the `package` job: two of them packing and installing five database drivers is
+# a lot of runner time spent answering a question that is already out of date.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: test (node ${{ matrix.node-version }}, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # `server_e2e` alone has a 30 second `beforeAll`, `server_timeouts` runs a
+    # four-million-row recursive CTE, and the Windows leg is slower than the Linux
+    # one for the same reason CI documents: drive-letter path handling. Twenty
+    # minutes is roughly four times the slowest observed run.
+    timeout-minutes: 20
 
     strategy:
       fail-fast: false
       matrix:
-        # 18 reached end of life in April 2025; 24 is the current release line.
-        node-version: [20.x, 22.x, 24.x]
+        # The floor is pinned, not floated.
+        #
+        # `engines` says `>=20.19.0`, and a `20.x` entry resolves to the *newest*
+        # 20.x -- so a driver that quietly required 20.19 would never be caught,
+        # because CI was testing something three years newer than the floor it
+        # advertises. `20.19.0` is the version npm will actually hand somebody
+        # with a 20 on their machine.
+        node-version: ['20.19.0', '22.x', '24.x']
         # The SQLite URI handling rewrites drive-rooted paths, so Windows is not
         # a cosmetic second target: it exercises a branch no Linux run reaches.
         os: [ubuntu-latest]
         include:
           - node-version: 22.x
             os: windows-latest
+          # The newest 20.x as well, so a regression that only appears late in a
+          # minor line is still visible.
+          - node-version: '20.x'
+            os: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
     - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
     - run: npm ci
-    # Its own script rather than `npm test -- --coverage`: npm 12 treats the
-    # flag as its own and fails with EUNKNOWNCONFIG.
-    - run: npm run test:coverage
+    - run: npm test
 
     - name: Audit production dependencies
       # A vulnerable runtime dependency reaches every user of the package.
       run: npm audit --omit=dev --audit-level=high
 
-  package:
-    # The unit suite runs against the working tree, where this package's own
-    # allowScripts entry applies. 2.0.0 passed CI and still shipped a server
-    # that could not start for a consumer whose npm blocked the sqlite3 install
-    # script, so the packed artifact is installed and driven on its own.
-    name: verify packed package
+  coverage:
+    name: coverage
     runs-on: ubuntu-latest
+    # One leg, not five. Instrumenting five runtimes to print the same number five
+    # times costs runner time and tells us nothing extra; the threshold below is
+    # the part that has to be enforced, and it is enforced here.
+    timeout-minutes: 25
 
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-node@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: 22.x
+        cache: 'npm'
+    - run: npm ci
+    # Its own script rather than `npm test -- --coverage`: npm 12 treats the flag
+    # as its own and fails with EUNKNOWNCONFIG. The global `coverageThreshold` in
+    # jest.config.cjs makes this step fail on a regression -- the coverage was
+    # previously computed and thrown away, which is the same as not computing it.
+    - run: npm run test:coverage
+
+    - name: Upload the coverage report
+      # `lcov` so an external service can read it if one is added, and the
+      # json-summary so a reviewer can read the number without downloading
+      # anything. No codecov/coveralls token is configured, and adding a third
+      # party to the release path of a package that handles database credentials
+      # is not a decision this file should make quietly.
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: coverage-${{ github.run_id }}
+        path: coverage/
+        if-no-files-found: error
+        retention-days: 14
+
+  live:
+    # The four databases with no integration coverage.
+    #
+    # `__tests__/README.md` section 1 says it plainly: the jest suites have "not
+    # been made live-aware", so a broken driver is caught only here. That is why
+    # 2.0.0 could pass CI with a driver broken against anything but a double.
+    #
+    # (An earlier version of this comment quoted a Russian sentence from that
+    # file to make the same point. The file has since been rewritten and the
+    # sentence no longer exists, so the reference was dropped rather than left
+    # pointing at nothing. If you are checking the claim, section 1 of that file
+    # is where it lives now.)
+    #
+    # WHAT IS AND IS NOT LIVE-AWARE TODAY
+    # ------------------------------------
+    #   - `test_adapters_integration.test.js` reads no environment variable and has
+    #     no branch for "a server is available". All four backends run against
+    #     in-process doubles; only SQLite runs against the real driver.
+    #   - `registry_integration.test.js` replaces `registry.mapping` with stubs.
+    #   - `server_e2e.test.js` runs on `sqlite://:memory:` and deliberately points
+    #     at `127.0.0.1:1` and `127.0.0.1:3999` to assert *failure* paths, so
+    #     starting real services on the default ports would not help it and could
+    #     make those assertions lie.
+    #   - `test_policy_live.test.js` IS live-aware, and is what the second step
+    #     below runs. It gates every block on the same four variables, and it
+    #     asserts real outcomes rather than round trips.
+    #
+    # So this job runs `scripts/live-adapters.mjs`, which drives the real
+    # `AdapterRegistry` against each container through a read / write / read-back /
+    # describe round trip, and then runs the live-aware suite. The script alone
+    # gave CI a real failure when a driver was broken; the suite is what makes it
+    # fail when a driver is *wrong* — a placeholder spelled wrongly, a code that
+    # does not survive the adapter's rewrite, a `db_explain` that returns nothing.
+    name: live adapters
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: anydb
+          POSTGRES_PASSWORD: anydb
+          POSTGRES_DB: anydb
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U anydb -d anydb"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: anydb
+          MYSQL_DATABASE: anydb
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uanydb -panydb"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      mongo:
+        image: mongo:7
+        ports: ['27017:27017']
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ping:1}).ok'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      ANYDB_TEST_POSTGRES: postgres://anydb:anydb@127.0.0.1:5432/anydb
+      ANYDB_TEST_MYSQL: mysql://root:anydb@127.0.0.1:3306/anydb
+      ANYDB_TEST_MONGODB: mongodb://127.0.0.1:27017/anydb
+      ANYDB_TEST_REDIS: redis://127.0.0.1:6379
+
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: 22.x
+        cache: 'npm'
+    - run: npm ci
+    - run: node scripts/live-adapters.mjs
+    - name: Run the live-aware adapter suite
+      # The script above is a smoke test; this is the suite. It reads the same
+      # four variables and runs the same eight steps per backend, so a driver that
+      # passes the smoke test and fails a real assertion still fails the job.
+      #
+      # UNEXERCISED LOCALLY. There is no container runtime on the machine this step
+      # was written on, so it has never been run end to end. What *has* been run is
+      # the file's own harness block, which drives the same eight steps against
+      # `sqlite://:memory:` on every ordinary `npm test` (see the describe at the
+      # bottom of `__tests__/test_policy_live.test.js`) — that validates the test
+      # code, not the four containers. The first real execution of this step is
+      # whichever push reaches it, so read the failures as untested code rather
+      # than as a regression.
+      #
+      # No ANYDB_ALLOW_PRIVATE_HOSTS here on purpose: each registry in that suite
+      # sets it on its own `env`, so this step cannot relax the policy for
+      # anything else.
+      #
+      # Per-test timeouts are the file's business: `describeIfLive` passes 60000
+      # and the `beforeAll`/`afterAll` hooks get `HOOK_TIMEOUT` explicitly, because
+      # a CI service container is cold when the job starts and a `db_schema` on a
+      # fresh MySQL with `detail: 'full'` can take several seconds. `jest.config.cjs`
+      # stays at 20000 for the rest of the suite, which is why this is a per-file
+      # decision rather than a config one.
+      run: node ./node_modules/jest/bin/jest.js --config=jest.config.cjs __tests__/test_policy_live.test.js
+
+  package:
+    # The unit suite runs against the working tree, where this repository's own
+    # `.npmrc` allow-scripts applies. 2.0.0 passed CI and still shipped a server
+    # that could not start for a consumer whose npm blocked the sqlite3 install
+    # script, so the packed artifact is installed and driven on its own.
+    #
+    # macOS is here for one reason and not for parity: the bin shim is executed,
+    # and `isDirectRun()` compares `realpathSync(process.argv[1])` with this
+    # module's own path to decide whether to start the server. On a
+    # case-insensitive filesystem a mismatch means the bin exits 0 having served
+    # nothing, and no Linux or Windows run can see that.
+    name: verify packed package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
       with:
         node-version: 22.x
         cache: 'npm'

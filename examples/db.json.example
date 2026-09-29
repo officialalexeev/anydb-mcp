@@ -1,0 +1,228 @@
+// anydb connection profiles -- TEMPLATE
+// =====================================
+//
+// Copy this file to ~/.anydb/db.json, delete the `//` lines, and fill in your
+// own values. Two files that make sense:
+//
+//     POSIX:   ~/.anydb/db.json
+//     Windows: %USERPROFILE%\.anydb\db.json
+//     or:     $XDG_CONFIG_HOME/anydb/db.json
+//     or:     whatever ANYDB_CONFIG points at
+//
+// This file is JSON *with comments* (JSONC), because JSON itself has none and
+// every field below has a decision attached to it. Remove the `//` lines before
+// you save it: the loader is `JSON.parse`, and it will refuse a file with a
+// comment in it.
+//
+// PERMISSIONS
+// -----------
+// `db.json` is a credential store. It must be 0600, and the directory 0700:
+//
+//     chmod 700 ~/.anydb
+//     chmod 600 ~/.anydb/db.json
+//
+// `db_list` reports a profile's name, description, driver, whether it is the
+// default, and whether it is read-only. It never reports a URI, a host, a
+// username, a password or a file path -- not masked, absent -- because that
+// text goes into the model's context window.
+//
+// TOP-LEVEL SHAPE
+// ---------------
+//   default   optional; the profile name an unqualified `profile` resolves to
+//             and the one `db_list` lists first. Must name a profile that exists.
+//   profiles  required; an object of named connections.
+//   $schema   optional; ignored by this server, used by editors.
+//
+// ---------------------------------------------------------------------------
+
+
+{
+  "$schema": "https://anydb.dev/schema/db.json",
+
+  // The profile `db_list` lists first.
+  "default": "app-readonly",
+
+  "profiles": {
+
+    // -----------------------------------------------------------------------
+    // 1. PostgreSQL, password from the environment
+    // -----------------------------------------------------------------------
+    // The `{"env": …}` form. The variable is read here, on this side of the
+    // JSON-RPC frame, and the value never becomes part of a tool call. An unset
+    // or empty variable is a *named* failure, not a silent empty password.
+    //
+    // Prefer this over a literal password anywhere. A literal is accepted and
+    // warned about once per profile, but it makes the file itself the secret.
+    "app-readonly": {
+      "description": "Application database, read-only. Row counts and schema questions.",
+      "driver": "postgres",
+      "uri": "postgres://app_ro@db.example.com:5432/appdb",
+      "password": { "env": "APP_DB_PASSWORD" },
+
+      // A profile that does not mention a limit does not get one either; the
+      // server default (1000 rows, 256 KiB) applies. Pin them here when this
+      // particular database deserves a smaller answer.
+      "maxRows": 500,
+      "maxBytes": 131072,
+      "queryTimeoutMs": 15000,
+
+      // Refuse anything outside this host, whatever a caller sends. The profile
+      // list and ANYDB_ALLOWED_HOSTS both apply; the tighter one wins. `*` means
+      // every host and `*.example.com` means subdomains but not the bare domain.
+      "hosts": ["*.example.com"],
+
+      // Schema and table allowlists, for SQL. A HEURISTIC OVER IDENTIFIERS, not
+      // a parser and not a security boundary: it reads table names out of the
+      // statement text. A dynamically constructed name defeats it. The database
+      // role is the real control. With allowedSchemas set, an unqualified table
+      // name is refused rather than resolved against an unreadable search_path.
+      "allowedSchemas": ["public"]
+    },
+
+    // -----------------------------------------------------------------------
+    // 2. MySQL / MariaDB, password from a file
+    // -----------------------------------------------------------------------
+    // The `{"file": …}` form. One trailing newline is stripped, because every
+    // way of writing a secret file ends one. A file larger than 64 KiB is
+    // refused, and a file readable beyond its owner is warned about once.
+    //
+    // `mariadb://` is MariaDB's own scheme name and routes to the MySQL driver.
+    "reporting": {
+      "description": "Reporting replica. Wide reads, so a bigger row budget and a longer timeout.",
+      "driver": "mariadb",
+      "uri": "mariadb://report_ro@mysql-replica.example.com:3306/reporting",
+      // TLS goes on the connection string, in the spellings this adapter
+      // understands: REQUIRED encrypts, VERIFY_CA and VERIFY_IDENTITY also check
+      // the certificate. An unrecognised mode is an error, not a silently
+      // plaintext connection. To use it, replace the "uri" above with:
+      //
+      //   "uri": "mariadb://report_ro@mysql-replica.example.com:3306/reporting?ssl-mode=VERIFY_CA&charset=utf8mb4"
+      "password": { "file": "/run/secrets/reporting_db_password" },
+
+      "maxRows": 2000,
+      "maxBytes": 524288,
+      "queryTimeoutMs": 60000,
+      "hosts": ["mysql-replica.example.com"]
+    },
+
+    // -----------------------------------------------------------------------
+    // 3. MongoDB Atlas, password from a command
+    // -----------------------------------------------------------------------
+    // The `{"exec": […]}` form. The argv array is run with `execFile` and no
+    // shell, so nothing in this file can be turned into a second command; each
+    // element is one argument to the child process. stdout is the secret, and
+    // it is never logged: a failure message reports the exit code and the
+    // reason, deliberately not the output.
+    //
+    // `mongodb+srv://` is the form Atlas hands out and it is resolved by the
+    // driver. The database name must be in the path -- a URI without one is
+    // refused, because otherwise every command would go wherever the server
+    // happens to default to while the tool reported no database at all.
+    //
+    // This is also the only writable profile in this file. `readOnly: false`
+    // allows a write to existing data. `allowDestructive` is NOT set, so a
+    // statement that changes schema or replaces a collection is still refused
+    // -- and the two flags are set by the same caller, which is a weak
+    // boundary. Give it a database role that cannot write and neither flag
+    // matters.
+    "atlas-app": {
+      "description": "MongoDB Atlas, application collections. The only writable profile here.",
+      "driver": "mongodb",
+      "uri": "mongodb+srv://app_rw@cluster0.example.mongodb.net/appdb",
+      "password": {
+        "exec": ["op", "read", "op://services/anydb/atlas/password"],
+        "timeoutMs": 5000
+      },
+      "readOnly": false,
+      "maxRows": 200,
+      "queryTimeoutMs": 20000,
+      "hosts": ["cluster0.example.mongodb.net"]
+    },
+
+    // -----------------------------------------------------------------------
+    // 4. Redis, password from a keychain
+    // -----------------------------------------------------------------------
+    // The `{"keychain": …}` form. There is no cross-platform keychain reader in
+    // Node's standard library, so one is not built in: set ANYDB_KEYCHAIN_CMD to
+    // a template, or inject a `keychainProvider` when you embed this package.
+    //
+    //     ANYDB_KEYCHAIN_CMD=op read op://{service}/{account}
+    //     ANYDB_KEYCHAIN_CMD=security find-generic-password -s {service} -a {account} -w
+    //
+    // {service} and {account} are substituted, the template is split on
+    // whitespace, and the result is run with `execFile` -- no shell, so a
+    // service or account name cannot carry a command. The command template is
+    // deliberately NOT configurable from this file: a writable db.json must
+    // not be able to choose what this server executes.
+    //
+    // `rediss://` is redis over TLS. A URI with no username is the normal form
+    // for a Redis ACL `default` user, so the username is left out here.
+    //
+    // NOTE: a Redis URI is pinned to the database its path names. SELECT,
+    // MULTI/EXEC and the other session commands are refused, because a cached
+    // connection is shared and `SELECT 1` would silently retarget every later
+    // command for this URI.
+    "cache": {
+      "description": "Redis cache. Fast single-key reads.",
+      "driver": "redis",
+      "uri": "rediss://default:not-a-real-password@redis.example.com:6379/0",
+      "password": { "keychain": "anydb/redis", "account": "default" },
+      "queryTimeoutMs": 5000,
+      "maxRows": 200
+    },
+
+    // -----------------------------------------------------------------------
+    // 5. SQLite, and the path allowlist
+    // -----------------------------------------------------------------------
+    // `path` is resolved against the directory holding THIS file, not against
+    // the server's working directory -- which is set by the MCP client, not by
+    // whoever wrote the config. A committed db.json can therefore carry
+    // "./data/app.db" and work on every machine that checks it out.
+    //
+    // `path` is for SQLite only, and only with `"driver": "sqlite"`; a `path`
+    // on any other driver is a load-time error rather than a silently ignored
+    // field. A `password` alongside a `path` is refused: a SQLite file is
+    // opened with this process's filesystem permissions and has no credentials.
+    //
+    // `allowedPaths` is a directory allowlist for this profile. A path matches
+    // only when it IS the directory or sits inside it on a path-segment
+    // boundary, so "C:/data/app2.db" does not match "C:/data/app.db".
+    //
+    // Read the SQLite section of docs/security.md before you rely on any of
+    // this: by default a sqlite:// URI can open any file this process can
+    // read, as a database. ANYDB_STRICT_SQLITE_PATHS=1 turns the default
+    // around so a path has to be named in advance.
+    "dev": {
+      "description": "Local development database. Read-only, and only the two directories below.",
+      "driver": "sqlite",
+      "path": "./data/app.db",
+      "readOnly": true,
+      "allowedPaths": ["./data"],
+      "queryTimeoutMs": 5000
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// A LITERAL PASSWORD IS ALSO ACCEPTED
+// ---------------------------------------------------------------------------
+//
+//     "password": "some-plaintext-password"
+//
+// It is the ordinary case -- a password in a 0600 file is what ~/.pgpass has
+// always been -- and the server warns about it once per profile rather than
+// refusing it. But it makes this file a credential: a crash report, a backup, a
+// `git add -A`, or a client that reads it and shows it to you all become a leak.
+// The four reference forms above are the answer to that, and they are the shapes
+// 1Password and AWS converged on for the same reason.
+//
+// ---------------------------------------------------------------------------
+// A FOURTH THING THIS FILE CANNOT DO
+// ---------------------------------------------------------------------------
+//
+// This file is writable by anyone who can write files, and `description`,
+// `allowedSchemas` and the profile names go into the model's context window.
+// So a profile description is a prompt-injection surface, which is why its
+// length is capped (500 characters) and list sizes are capped. The real answer
+// is filesystem permissions: 0600 on the file, 0700 on the directory, and an
+// account the agent's user cannot write.

@@ -1,0 +1,15 @@
+# The Node version a contributor should develop against.
+#
+# Not the floor, and not the newest. `engines` says `>=20.19.0`, and CI runs
+# 20.19.0, 22.x, 24.x and 20.x -- but 20.19.0 is the version CI uses to *prove the
+# floor still works*, which makes it a poor choice for day-to-day development:
+# nobody should be missing a standard library method that Node 22 has while
+# writing a feature.
+#
+# 22.x is the line this repository develops on, and the line the Windows and
+# coverage CI legs use. It is the active LTS, it is what most MCP hosts ship, and
+# it is the version the two release workflows run `npm run verify:package` on.
+# `.nvmrc` exists so that `nvm use` and every editor that reads it agree, because
+# the previous answer was "whichever Node you happened to have", and the first
+# symptom of that is a contributor reporting a bug that only reproduces on 24.
+22.14.0

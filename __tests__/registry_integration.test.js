@@ -28,15 +28,14 @@ describe('AdapterRegistry integration', () => {
     test('every scheme produces a real adapter class', () => {
       const seen = new Set();
       // Several schemes deliberately share an adapter: rediss with redis,
-      // mysql+pymysql and friends with mysql.
+      // mysql+pymysql and friends with mysql. BaseAdapter's own methods throw, so a
+      // real subclass is the proof that the scheme is wired up.
       const aliases = new Map();
 
       for (const [scheme, factory] of Object.entries(registry.mapping)) {
         const adapter = factory(1000);
         const name = adapter.constructor.name;
 
-        // BaseAdapter's own methods throw, so a real subclass is the proof
-        // that the scheme is actually wired up.
         expect(name).toMatch(/Adapter$/);
         expect(name).not.toBe('BaseAdapter');
         aliases.set(scheme, name);
@@ -83,9 +82,9 @@ describe('AdapterRegistry integration', () => {
   });
 
   describe('read-only applies to every adapter', () => {
-    // Stub adapters, so the guard is exercised through the real registry without
-    // a driver resolving a hostname. Real adapters against fake hosts leave
-    // pools that get disposed after the suite has finished.
+    // Stub adapters, so the guard runs through the real registry without a driver
+    // resolving a hostname. Real adapters against fake hosts leave pools that get
+    // disposed after the suite has finished.
     const stubAdapter = () => ({
       connect: jest.fn().mockResolvedValue(undefined),
       execute: jest.fn().mockResolvedValue([{ ok: 1 }]),

@@ -1,0 +1,39 @@
+# Where an issue goes, and where it does not.
+#
+# The one thing that has to be right here is the security route. This package
+# ingests database credentials and executes model-generated SQL, and CHANGELOG.md
+# records three real defects of exactly that shape: a read-only bypass, credentials
+# written to the log, and a dead connection handed to the next caller. Every one of
+# them would have been easier to fix if there had been a private channel to say so
+# on. There was not.
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/officialalexeev/anydb-mcp/security/advisories/new
+    about: >-
+      Do not open a public issue for anything that leaks a credential, bypasses the
+      read-only guard, or executes a statement the server said it would not. Use the
+      private advisory form; it is the only channel that is not world-readable
+      while the report is triaged. See SECURITY.md for what to include and what
+      to expect.
+
+  - name: Security policy and hardening
+    url: https://github.com/officialalexeev/anydb-mcp/blob/main/SECURITY.md
+    about: >-
+      Supported versions, the disclosure timeline, and the operator hardening
+      guide — a read-only database role, `profile` over `uri`, `0600` on `db.json`,
+      and what `ANYDB_ALLOW_ADHOC_URI` and `ANYDB_STRICT_SQLITE_PATHS` do and do
+      not do.
+
+  - name: Report something that is not a bug
+    url: https://github.com/officialalexeev/anydb-mcp/blob/main/CHANGELOG.md
+    about: >-
+      Feature requests belong in an issue, but check the changelog first: the tool
+      set, the result envelope and the policy switches have all changed recently,
+      and what looks like a missing feature is sometimes a behaviour that moved.
+
+  - name: Question about using it
+    url: https://github.com/officialalexeev/anydb-mcp/discussions
+    about: >-
+      How to configure it, which editor, how to structure a profile. Blank issues
+      are disabled, so a question needs a discussion rather than an issue.

@@ -1,11 +1,12 @@
 {
   "name": "anydb-mcp",
-  "version": "2.0.4",
+  "version": "3.0.0",
   "description": "Universal database connector for AI agents (Cursor, Claude, Gemini, Zed, Cline). Zero-config MCP server for PostgreSQL, MySQL, SQLite, MongoDB, and Redis.",
   "type": "module",
-  "main": "src/index.js",
+  "main": "src/lib.js",
   "exports": {
-    ".": "./src/index.js",
+    ".": "./src/lib.js",
+    "./server": "./src/index.js",
     "./package.json": "./package.json"
   },
   "engines": {
@@ -21,8 +22,13 @@
   "files": [
     "src/",
     "docs/",
+    "!docs/build-and-publish.md",
+    "!docs/publication_guide_ru.md",
+    "examples/",
     "README.md",
     "CHANGELOG.md",
+    "SECURITY.md",
+    "CODE_OF_CONDUCT.md",
     "LICENSE"
   ],
   "scripts": {
@@ -85,8 +91,5 @@
     "@babel/preset-env": "^7.29.7",
     "babel-jest": "^30.5.2",
     "jest": "^30.5.2"
-  },
-  "allowScripts": {
-    "sqlite3": true
   }
 }

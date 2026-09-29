@@ -1,0 +1,163 @@
+# Publish, and then check what was published.
+#
+# Until this file existed, publishing was 100% manual: `npm version`, `git tag`,
+# `git push`, `npm publish` at a terminal with an interactive 2FA prompt, and then
+# a second terminal for `node scripts/verify-package.mjs --from-registry`. Every
+# one of those steps is documented in `docs/build-and-publish.md` and
+# `docs/publication_guide_ru.md`, and none of them is a step that can be run twice
+# safely by accident.
+#
+# WHAT THIS DOES NOT REPLACE
+# --------------------------
+# The version bump, the CHANGELOG entry and the tag are still a maintainer's job,
+# by hand. This workflow starts at the tag.
+#
+# RECONCILIATION NEEDED WITH THE MANUAL GUIDE
+# ------------------------------------------
+# `docs/publication_guide_ru.md` part 4 and `docs/build-and-publish.md` section 5
+# say to run `npm publish` at a terminal, approve the 2FA prompt in a browser, and
+# then run `verify-package.mjs --from-registry` by hand. Every one of those three
+# steps is now either done here or is the step this workflow waits for. The
+# documented procedure and this workflow must not both be followed for one
+# release: a manual `npm publish` followed by this workflow's publish step fails
+# with `E403 Cannot publish over the previously published version`, and the second
+# failure is the confusing one because the first publish actually worked.
+#
+# The documentation owner should therefore reduce part 4 to "tag, push, watch
+# Actions", and keep the 2FA and unpublish procedures as what they are: the
+# recovery path for when this workflow fails, not part of the happy path. The
+# 2FA note changes character -- it is no longer needed for a publish (trusted
+# publishing with an OIDC token is), but it is still needed for `npm unpublish` and
+# for `npm owner add`, and that is the distinction the guide should make.
+name: Publish
+
+on:
+  push:
+    tags: [ 'v*' ]
+  # Manual dispatch, for the "the tag was wrong" case. The version is read from
+  # the tag that is checked out, not from an input, so a manual run publishes
+  # whatever the tag says rather than whatever the form said.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One publish at a time, and a run in flight is *not* cancelled: cancelling
+  # halfway through `npm publish` is how you get a half-published release.
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: verify before publishing
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      with:
+        # The tag's commit, not the default branch: `v3.0.0` must publish the tree
+        # that `v3.0.0` points at.
+        ref: ${{ github.ref }}
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: 22.x
+        cache: 'npm'
+        registry-url: https://registry.npmjs.org
+    - run: npm ci
+    - run: npm test
+    - run: npm run verify:package
+
+  publish:
+    name: publish ${{ github.ref_name }}
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: npm
+    permissions:
+      contents: read
+      # For npm provenance. The token is minted from the workflow's OIDC identity,
+      # exchanged for a short-lived publish token, and never stored: this is what
+      # removes the 2FA prompt from the release path and the reason a leaked
+      # `NPM_TOKEN` is no longer the worst thing that could happen to this repo.
+      id-token: write
+
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      with:
+        ref: ${{ github.ref }}
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: 22.x
+        cache: 'npm'
+        registry-url: https://registry.npmjs.org
+
+    - name: Refuse to publish a version that already exists
+      # The cheapest guard against the failure this workflow can cause. A re-run
+      # of a successful tag should stop here, not at npm.
+      run: |
+        version=$(node -p "require('./package.json').version")
+        tag="${GITHUB_REF_NAME#v}"
+        if [ "$version" != "$tag" ]; then
+          echo "::error::package.json says $version but the tag says $tag. Nothing was published."
+          exit 1
+        fi
+        if npm view "anydb-mcp@$version" version >/dev/null 2>&1; then
+          echo "::error::anydb-mcp@$version is already on the registry. Deprecate it or move the tag."
+          exit 1
+        fi
+
+    - name: Publish with provenance
+      # `--provenance` is what links this tarball to this workflow run and this
+      # commit. It is not decoration: this package holds database credentials, and
+      # provenance is the difference between "npm says this is anydb-mcp 3.0.0"
+      # and "npm says this is anydb-mcp 3.0.0, built from commit X in the
+      # officialalexeev/anydb-mcp repository by a workflow with these permissions".
+      #
+      # `NODE_AUTH_TOKEN` is required for `--provenance` to be accepted even though
+      # the credential itself is an OIDC exchange; npm's docs are explicit that
+      # the variable has to be set.
+      run: npm publish --provenance --access public
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  verify-published:
+    name: verify what is on the registry
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    # The tarball is not fetched by hand: `verify-package.mjs --from-registry`
+    # installs the *published* artifact into a temp directory and drives it there,
+    # so this job tests what npm actually serves rather than a local build of it.
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: 22.x
+
+    # A full checkout, deliberately. `verify-package.mjs --from-registry` installs
+    # the *published* tarball into a temp directory, but it also reads this
+    # repository's `package.json` and `src/index.js` to assert the file list and
+    # the shebang, and a sparse checkout would make those reads fail in a way that
+    # looks like a packaging defect.
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      with:
+        ref: ${{ github.ref }}
+
+    - name: Wait for the registry to serve the version
+      # Propagation takes a few minutes. A 404 immediately after a publish is not
+      # a failure, so the check is "is it there yet", not "is it there".
+      run: |
+        version="${GITHUB_REF_NAME#v}"
+        for attempt in $(seq 1 20); do
+          if npm view "anydb-mcp@$version" version >/dev/null 2>&1; then
+            echo "anydb-mcp@$version is on the registry after $((attempt * 30))s"
+            exit 0
+          fi
+          echo "attempt $attempt: not yet published, waiting 30s"
+          sleep 30
+        done
+        echo "::error::anydb-mcp@$version did not appear on the registry within 10 minutes."
+        exit 1
+
+    - name: Drive the published package
+      run: node scripts/verify-package.mjs --from-registry --version=${{ github.ref_name }}

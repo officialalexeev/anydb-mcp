@@ -1,0 +1,29 @@
+# Copy to `.npmrc` in *your* project if `npm install` reports that the sqlite3
+# install script was blocked.
+#
+# When you need this
+# ------------------
+# `anydb-mcp` depends on `sqlite3`, which ships its prebuilt native binding
+# through an install script. npm 12 and later block install scripts by default.
+# If `db_query` answers "SQLite support is unavailable", npm blocked it.
+#
+# Two ways to approve it
+# ----------------------
+# 1. `npm install-scripts approve sqlite3`
+#    This writes an `allowScripts` field into your `package.json`. It is the
+#    documented default because it survives a reinstall of npm and needs no dotfile.
+#
+#    Note the precedence rule: a `package.json` `allowScripts` field *suppresses*
+#    the `.npmrc` `allow-scripts` setting below. If you use both, only the
+#    `package.json` one is read, and npm prints a warning saying so.
+#
+# 2. This file, copied to `.npmrc` in your project root:
+#
+#       allow-scripts=sqlite3
+#
+#    Works as long as your `package.json` has no `allowScripts` field of its own.
+#
+# The other four databases -- PostgreSQL, MySQL, MongoDB, Redis -- are pure
+# JavaScript and are unaffected either way.
+#
+# Then:  npm rebuild sqlite3

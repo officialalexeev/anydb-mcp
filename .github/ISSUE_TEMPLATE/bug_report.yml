@@ -1,0 +1,173 @@
+# A bug report
+#
+# This package has five databases and five tools, so "it doesn't work" is 25
+# combinations plus the environment. The form forces the four facts that identify
+# one of them -- the URI scheme, the tool, the action, and the debug output --
+# rather than asking for them in prose and getting a paragraph instead.
+#
+# It is deliberately a *form* and not a Markdown template. A template gets a
+# heading and four empty sections; a form gets filled in, because each field is
+# required and the submit button does not work until it is.
+name: Bug report
+description: Something behaved differently from what the documentation says it should do.
+title: "[db_<tool>] <scheme>: <what happened>"
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. Two things first:
+
+        * **Do not paste a connection string.** Replace the password with `***`
+          and the host with `localhost` if that is what it is. `db_list` reports
+          profiles with no URI, so a report can be complete without one.
+        * **If this is a security problem, stop here and do not file it.**
+          Use the private advisory form instead — see [SECURITY.md](../blob/main/SECURITY.md).
+          A public issue is world-readable before anyone can take it down.
+
+  - type: dropdown
+    id: tool
+    attributes:
+      label: Which tool
+      description: The name of the tool call, exactly as it appears in the transcript.
+      options:
+        - db_query
+        - db_schema
+        - db_explain
+        - db_health
+        - db_list
+        - not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scheme
+    attributes:
+      label: Which database
+      description: >-
+        The URI scheme. If you reached it through a profile, `db_list` reports the
+        driver — that is the answer.
+      options:
+        - sqlite
+        - postgres / postgresql
+        - mysql / mariadb
+        - mongodb
+        - redis
+        - not sure
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `db_health`, or `npm ls anydb-mcp`.
+      placeholder: 3.0.0
+    validations:
+      required: true
+
+  - type: input
+    id: node
+    attributes:
+      label: Node.js and npm
+      description: `node --version` and `npm --version`. The npm floor for install scripts is 11.
+      placeholder: v22.23.2 / 12.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: action
+    attributes:
+      label: What were you trying to do
+      description: >-
+        The nearest one. This is what decides whether the answer belongs in
+        `safety.js`, `policy.js`, an adapter, or the tool layer.
+      options:
+        - read rows (db_query, no action)
+        - count or distinct
+        - aggregate (MongoDB pipeline)
+        - list tables or collections (db_schema)
+        - explain a statement (db_explain)
+        - check health or privileges (db_health)
+        - list profiles (db_list)
+        - write: INSERT / UPDATE / DELETE
+        - schema change: CREATE / ALTER / DROP
+    validations:
+      required: true
+
+  - type: textarea
+    id: call
+    attributes:
+      label: The tool call
+      description: >-
+        The arguments you passed, with `params` values left as values rather than
+        pasted into the statement. A bound value is the difference between a
+        reproducible report and one that has to be guessed at.
+      placeholder: |
+        {
+          "profile": "local",
+          "query": "SELECT id, email FROM users WHERE id = ?",
+          "params": [42],
+          "limit": 100
+        }
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: Two or three sentences. What should the answer have been?
+    validations:
+      required: true
+
+  - type: textarea
+    id: debug
+    attributes:
+      label: Debug output
+      description: >-
+        Re-run with `ANYDB_DEBUG=1` and paste stderr. This is the part that
+        decides the bug: without it there is a stack trace nobody can see.
+
+        Query text is written at debug level, so **read it before you paste it** —
+        a statement routinely carries a literal that is somebody's personal data.
+        Credentials are masked in every record, including the username.
+      placeholder: |
+        [anydb] 2026-01-01T00:00:00.000Z error db_query uri=postgres://***:***@localhost/db ...
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Profile, if you used one
+      description: >-
+        Paste the `db.json` entry with every credential removed, and say whether
+        the file is `0600`. `{"profiles":{"local":{"driver":"postgres","readOnly":true,"maxRows":1000}}}`
+        is enough.
+    validations:
+      required: false
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: >-
+        The smallest thing that shows the same result. If the answer depends on
+        the shape of the table, what that shape is.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched the open and closed issues for this.
+          required: true
+        - label: I read the Known limitations section of the README, and this is not one of them.
+          required: false
+        - label: There are no credentials in anything above.
+          required: true

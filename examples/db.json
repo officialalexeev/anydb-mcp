@@ -1,0 +1,17 @@
+{
+  "default": "local",
+  "profiles": {
+    "local": {
+      "description": "A SQLite file next to this config. No credentials of any kind, so this works on a fresh machine with nothing installed.",
+      "driver": "sqlite",
+      "path": "./anydb-demo.db",
+      "readOnly": true
+    },
+    "local-writable": {
+      "description": "The same idea, with readOnly:false so a write is permitted. The file is created on first connect. allowDestructive is not set, so a schema change is still refused.",
+      "driver": "sqlite",
+      "path": "./anydb-demo-write.db",
+      "readOnly": false
+    }
+  }
+}

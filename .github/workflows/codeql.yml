@@ -1,0 +1,74 @@
+# Static analysis, on a schedule as well as on demand.
+#
+# Why this repository needs it, given that it is small: `anydb-mcp` takes
+# connection strings from an MCP client, interpolates nothing but still parses
+# whatever a model produced, writes a log file, reads `db.json`, and runs SQL
+# against five databases. `javascript-actions` in particular looks for exactly the
+# two mistakes this codebase is most exposed to -- a command built by string
+# concatenation (the `ANYDB_KEYCHAIN_CMD` shim, the `sqlite3` repair hint) and a
+# path built from untrusted input.
+#
+# It is free on a public repository, needs no token, and finds nothing when the
+# code is clean. Both suites run on a schedule because a finding on a push is a
+# finding on a commit somebody has already merged.
+#
+# `security-events: write` is required to upload results. It is scoped to this
+# workflow and to the `security-events` scope, and the job has no
+# `contents: write`, so a finding cannot be used to change the repository.
+name: CodeQL
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    # 03:17 UTC on a Monday. Off the hour on purpose: `schedule` runs on every
+    # repository in GitHub at :00, and the queue at a round hour is minutes long.
+    - cron: '17 3 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'javascript-typescript', 'javascript-actions' ]
+
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
+      with:
+        languages: ${{ matrix.language }}
+        # `src/` only. The jest configuration, the babel configuration and the
+        # verification script are build inputs, and CodeQL's JavaScript extractor
+        # has nothing to say about them; scanning them produces findings nobody
+        # can act on.
+        config: |
+          paths:
+            - src
+          paths-ignore:
+            - '**/*.test.js'
+            - '__tests__'
+            - coverage
+            - node_modules
+
+    - name: Perform CodeQL analysis
+      uses: github/codeql-action/analyze@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
+      with:
+        category: '/language:${{ matrix.language }}'

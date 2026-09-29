@@ -1,0 +1,57 @@
+# EditorConfig, because there is no linter.
+#
+# WHAT THIS IS AND IS NOT
+# -----------------------
+# There is no ESLint, no Prettier, no Biome and no `npm run lint` in this
+# repository, so this file is currently the only tooling that says anything at all
+# about formatting. It is followed by hand and by `.gitattributes`, not by a
+# process, and it is worth saying so rather than pretending otherwise.
+#
+# It is worth having anyway, because the tree is internally inconsistent:
+# `src/index.js` used double quotes while all of `src/core/` used single ones, and
+# five of forty-three files were CRLF. Those are exactly the differences a
+# contributing editor should be told about, and nothing else here is a house style
+# decision -- 2 spaces, LF, a final newline, trimmed trailing whitespace.
+#
+# The 2-space indent is not arbitrary and is not negotiable per file: the MCP
+# server's JSON-RPC frames, the log records and the tool schemas are all read in
+# diffs, and a file that reindents in somebody's editor produces a diff with no
+# content in it.
+#
+# `insert_final_newline` and `trim_trailing_whitespace` are the two that matter
+# most: a missing final newline is the reason the last line of a file shows up as
+# changed in every diff, and trailing whitespace inside a template literal in this
+# repository is *content* in a handful of places, so the last two entries below
+# exempt them rather than letting a save strip a space out of a message.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.md]
+# Two trailing spaces are a hard line break in Markdown, and this repository's
+# documentation uses them. Trimming them would silently reflow a paragraph.
+trim_trailing_whitespace = false
+
+[*.{yml,yaml}]
+# GitHub Actions files are conventionally two-space indented already, but the
+# `run: |` blocks inside them are shell, and shell indentation is not ours to
+# normalise.
+indent_size = 2
+
+[Makefile]
+indent_style = tab
+
+# Lockfiles and generated coverage output are not edited by hand.
+[package-lock.json]
+insert_final_newline = true
+
+[coverage/**]
+insert_final_newline = false
+trim_trailing_whitespace = false

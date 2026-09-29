@@ -1,0 +1,59 @@
+# Dependency updates, weekly.
+#
+# Nothing was bumping anything before this file existed. The workflows pinned
+# their actions to mutable `@v4` tags, so an action could change under a green
+# build with no pull request at all; and `npm outdated` on the working tree
+# already shows two dev dependencies a major behind, because there was nothing
+# watching.
+#
+# Weekly rather than daily: a Monday-morning run is reviewed on a working day, and
+# this repository's test suite takes about half a minute, so there is no reason to
+# spend a runner on a day a PR will not be looked at.
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+      time: '04:07'
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    commit-message:
+      # The repository's log is Conventional Commits -- `fix:`, `feat!:`, `chore:`,
+      # `test:`, `docs:` -- and a `chore(deps)` line is the same vocabulary. The
+      # `:` rather than `:` + scope convention is what the existing history uses.
+      prefix: 'chore'
+      prefix-development: false
+    groups:
+      # The MCP SDK is the one dependency whose minor bump can change what a
+      # consumer sees: the request/response shapes come from it. It gets a pull
+      # request on its own rather than arriving inside a batch of dev-dependency
+      # bumps, so a protocol change is reviewable on its own.
+      mcp-sdk:
+        patterns:
+          - '@modelcontextprotocol/sdk'
+      # Everything else in one review. Smaller and more frequent beats larger and
+      # neglected, and this repository has one maintainer.
+      dev-dependencies:
+        dependency-type: development
+
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+      time: '04:07'
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: 'ci'
+      prefix-development: false
+    groups:
+      actions:
+        patterns:
+          - '*'

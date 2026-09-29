@@ -1,0 +1,65 @@
+# Normalise line endings in the repository, and leave the working tree alone.
+#
+# `* text=auto` makes git normalise to LF in the index and check out with the
+# platform's own convention; `eol=lf` overrides that and checks out LF everywhere.
+# The second one is the deliberate choice here, for three reasons:
+#
+#   - The repository has a Windows CI leg, and a maintainer on Windows. With
+#     `text=auto` alone, the same file has different bytes on disk depending on
+#     who checked it out, and a diff that shows every line as changed is the
+#     symptom.
+#   - `src/index.js` is a `bin`, with a shebang. A CRLF shebang is `/usr/bin/env
+#     node\r` on Linux and macOS: "bad interpreter", and the installed package
+#     does not start. `scripts/verify-package.mjs` now asserts the file has no
+#     `\r` for exactly this reason.
+#   - Every generated artefact — the tarball, a lockfile diff, a `.tgz` checksum —
+#     is byte-sensitive, and CRLF is the kind of difference that is invisible in
+#     review and visible in a checksum.
+#
+# WHY THE BINARY EXCEPTIONS ARE HERE
+# ----------------------------------
+# The rule is `text` and not `-text`, so git decides by inspection. That is right
+# for a repository with no binary files, and the two entries below are not
+# belt-and-braces: they are there so that a `.tgz` or a `.node` added later is not
+# line-ending-damaged on its way into the index. A tarball mended by git is a
+# tarball npm cannot install.
+#
+# A NOTE ON THE FIVE CRLF FILES ALREADY IN THE TREE
+# --------------------------------------------------
+# Five of the forty-three tracked files are CRLF in the index today
+# (`CHANGELOG.md`, `package-lock.json`, `package.json`, `src/adapters/mongodb.js`,
+# `src/core/schema.js`) and thirty-eight are LF. This file does not fix that, on
+# purpose: `git add --renormalize .` rewrites every tracked file, which turns a
+# one-line configuration change into a whole-repository diff and buries the real
+# change. It has to be a separate commit, on its own, so that `git log -p` on the
+# next change is readable:
+#
+#     git add --renormalize .
+#     git commit -m "chore: normalise line endings to LF"
+#
+# until that commit exists, treat this file as the *policy* and the index as still
+# holding the old state.
+
+* text=auto eol=lf
+
+*.js   text eol=lf
+*.mjs  text eol=lf
+*.cjs  text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+
+# Not text, and never to be line-ending-processed.
+*.tgz    binary
+*.node   binary
+*.png    binary
+*.jpg    binary
+*.gif    binary
+*.ico    binary
+*.pdf    binary
+*.zip    binary
+*.gz     binary
+
+# Lockfiles and tarballs are generated and compared byte for byte.
+package-lock.json text eol=lf
