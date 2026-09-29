@@ -41,12 +41,27 @@ SENTINEL_CONF=/tmp/anydb-sentinel.conf
 NAMES=()
 
 log()  { echo "::notice title=redis-topologies::$1"; }
-fail() { echo "::error::$1"; exit 1; }
+
+# `fail` calls the diagnostic dump itself rather than relying on the ERR trap:
+# a trap fires when a *command* fails, and `fail` ends in `exit`, which never
+# triggers one. The first run of this script failed with a bare exit code 1 and
+# no output at all, which is the one thing a setup script must not do.
+fail() {
+  echo "::error::$1"
+  cleanup_on_error 1
+  exit 1
+}
 
 cleanup_on_error() {
-  local code=$?
+  # `${1:-$?}` rather than `$?`: inside a function, `$?` is the status of the
+  # call, not the argument. `cleanup_on_error 1` from `fail` has to report the 1.
+  local code=${1:-$?}
   if [ $code -ne 0 ]; then
-    echo "::error::topology setup failed with $code; dumping what each node said"
+    echo "::error::topology setup failed with exit $code"
+    # The state of each container, because the reason a `docker run` did not take
+    # is in there and not in the exit code: a mount that cannot be written, a
+    # port already taken, a config redis rejected.
+    echo "::error title=containers::$(docker ps -a --format '{{.Names}} {{.Status}}' 2>&1 | tr '\n' ';')"
     for name in "${NAMES[@]:-}"; do
       [ -n "$name" ] || continue
       echo "--- $name ---"
@@ -123,19 +138,24 @@ start_sentinel_set() {
   # 127.0.0.1 is that address here, because the client runs on the runner. The
   # config goes on the host, not inside another container: it is bind-mounted
   # into the sentinel, and a file written into the master's filesystem would not
-  # exist at that path. Left writable because a sentinel rewrites its own config
-  # on failover, and a read-only mount would turn a future failover test into an
-  # I/O error rather than a test.
+  # exist at that path.
+  #
+  # 666 because a sentinel rewrites its own config on startup and then again on
+  # every topology change, as the `redis` user inside the container, which is not
+  # the uid that created the file on the runner. A mount it cannot write makes
+  # the sentinel exit, and the container's own log is the only place that says so.
   cat > "$SENTINEL_CONF" <<EOF
 sentinel monitor $MASTER_NAME 127.0.0.1 $MASTER_PORT
 sentinel down-after-milliseconds $MASTER_NAME 5000
 sentinel failover-timeout $MASTER_NAME 10000
 EOF
+  chmod 666 "$SENTINEL_CONF"
 
   docker run -d --rm --name anydb-sentinel --network host \
     -v "$SENTINEL_CONF:/usr/local/etc/redis/sentinel.conf" \
     redis:7-alpine redis-server /usr/local/etc/redis/sentinel.conf --port "$SENTINEL_PORT" >/dev/null \
     || fail 'the sentinel container refused to start'
+  wait_for anydb-sentinel "$SENTINEL_PORT" || fail 'the sentinel never answered PING'
   local i=0
   while [ $i -lt 60 ]; do
     local reported
