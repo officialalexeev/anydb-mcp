@@ -160,8 +160,18 @@ start_sentinel_set() {
   # `redis-server` refuse to start rather than switch modes: "sentinel directive
   # while not in sentinel mode", a FATAL CONFIG FILE ERROR. Only the
   # `redis-sentinel` binary *is* sentinel mode, so that is the one to exec.
+  # The quorum argument is not optional in Redis 7.4. `sentinelHandleConfiguration`
+  # in src/sentinel.c tests `!strcasecmp(argv[0],"monitor") && argc == 5`, with
+  # the signature spelled out in its own comment as
+  # `monitor <name> <host> <port> <quorum>`. Three arguments is argc 4, the test
+  # fails, and the directive falls through to the final `else` and is reported as
+  # "Unrecognized sentinel configuration statement" - which is what it did here.
+  #
+  # Quorum 1 because this runs one sentinel: a quorum larger than the number of
+  # sentinels that can report is one failover can never reach, so any value above
+  # 1 would be a set that looks configured and can never promote anything.
   docker run -d --name anydb-sentinel --network host \
-    redis:7-alpine sh -c "printf 'sentinel monitor $MASTER_NAME 127.0.0.1 $MASTER_PORT\nsentinel down-after-milliseconds $MASTER_NAME 5000\nsentinel failover-timeout $MASTER_NAME 10000\n' > /data/sentinel.conf && exec redis-sentinel /data/sentinel.conf --port $SENTINEL_PORT" >/dev/null \
+    redis:7-alpine sh -c "printf 'sentinel monitor $MASTER_NAME 127.0.0.1 $MASTER_PORT 1\nsentinel down-after-milliseconds $MASTER_NAME 5000\nsentinel failover-timeout $MASTER_NAME 10000\n' > /data/sentinel.conf && exec redis-sentinel /data/sentinel.conf --port $SENTINEL_PORT" >/dev/null \
     || fail 'the sentinel container refused to start'
   wait_for anydb-sentinel "$SENTINEL_PORT" || fail 'the sentinel never answered PING'
   local i=0
