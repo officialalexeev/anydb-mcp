@@ -9,7 +9,76 @@ Release links for every version are at the bottom of this file.
 
 ## [Unreleased]
 
+## [3.0.2] - 2026-09-29
+
+> **Read this if you arrived from 3.0.1.** `anydb-mcp@3.0.1` on npm cannot start
+> on Linux or macOS, and 3.0.1 is deprecated. Upgrade to 3.0.2.
+
+### Fixed
+
+- **The installed server could not start on Linux or macOS.** npm writes a
+  `.cmd` shim on Windows and a symlink everywhere else, so on the other two
+  `process.argv[1]` is `node_modules/.bin/anydb-mcp` and never matched the
+  `src/index.js` pattern the version lookup tests. The server exited before
+  answering `initialize` -- no tools, no error, an MCP host sees a process that
+  started and said nothing. `ownPath()` now resolves the entry through `realpath`
+  before giving up. This is the whole of the 2.0.0 outage class, and it was in
+  3.0.1.
+- **A MongoDB data write needed two flags where a SQL write needs one.**
+  `insert`, `update`, `updateOne`, `replace`, `delete` and `deleteOne` were in
+  the destructive set, built from the write-action list rather than from the
+  names that change a collection's structure. The same row could be added to
+  PostgreSQL with `readOnly: false` and to MongoDB with `readOnly: false` plus
+  `allowDestructive: true`, with the reason "writes to a collection" for a write
+  the previous gate had already permitted. The set is now `drop`,
+  `dropDatabase`, `create` and `createIndex`.
+- **`scripts/live-adapters.mjs` still expected the 2.x result shape.** `describe`
+  returns an envelope in 3.0, so the report is under `rows`; the check looked for
+  `database` at the top level and failed on all four backends. It also read
+  `insertedId`, the MySQL spelling, where the MongoDB adapter returns
+  `insertedIds`.
+- **Two tests asserted Windows path handling on every operating system.** Both
+  built a drive-letter fixture out of `os.tmpdir()`, which is `C:\Users\...` on
+  Windows and `/tmp/...` elsewhere -- and `path.win32` turns the second into a
+  path with no drive, so `resolve()` falls back to the working directory and each
+  assertion compared unrelated strings. The product was right in both cases.
+- **`release.yml` defeated the trusted publishing it was written for.** The
+  publish step passed `NODE_AUTH_TOKEN` from `secrets.NPM_TOKEN`, on the comment
+  that npm requires it for `--provenance`. npm's documentation says the opposite:
+  the CLI detects the OIDC environment itself, and a real token takes precedence
+  over that. An unset secret passes an empty string, so the run fell back to
+  nothing on the runner and failed with `ENEEDAUTH`. The package-manager cache is
+  also gone from the publish job, per npm's guidance that a release build should
+  not use it.
+- **A `close()` on an already-closed connection was logged at `error`, with a
+  stack trace.** Present in 3.0.1; repeated here because 3.0.1 is deprecated.
+
+### Added
+
+- **CI names the failing test.** A red run reported only "Process completed with
+  exit code 1"; the name, the file and the message were in a log behind a
+  sign-in. `scripts/jest-github-reporter.cjs` emits an annotation per failure, and
+  `verify:package` and the live-adapter smoke script are teed and their `FAIL`
+  lines converted the same way. The reporter reads Jest's result shape
+  defensively, because Jest 30 renamed `name`/`assertionResults` to
+  `testFilePath`/`testResults`.
+
+### Known issues in this release
+
+- **`live adapters` is red.** The suite that drives the real PostgreSQL, MySQL,
+  MongoDB and Redis containers has never run end to end -- it was written on a
+  machine with no container runtime. MongoDB fails all eight checks with
+  `MongoServerSelectionError: Missing required sub-document 'driver' in the
+  client metadata document`, which is a server-side handshake rejection and is
+  not yet diagnosed. MySQL and PostgreSQL each fail one assertion. This job does
+  not gate a release; `release.yml` runs `npm test` and `verify:package` instead.
+
 ## [3.0.1] - 2026-09-29
+
+> **Deprecated, and broken on Linux and macOS.** This was published from a
+> working tree that did not yet contain the `ownPath` fix, so the server exits
+> before answering `initialize` on any POSIX system. The entry below records what
+> was *intended*; the only fix it actually shipped is the logging one. See 3.0.2.
 
 ### Fixed
 
@@ -990,7 +1059,8 @@ produced one.
 
 ---
 
-[Unreleased]: https://github.com/officialalexeev/anydb-mcp/compare/v3.0.1...HEAD
+[Unreleased]: https://github.com/officialalexeev/anydb-mcp/compare/v3.0.2...HEAD
+[3.0.2]: https://github.com/officialalexeev/anydb-mcp/compare/v3.0.1...v3.0.2
 [3.0.1]: https://github.com/officialalexeev/anydb-mcp/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/officialalexeev/anydb-mcp/compare/v2.0.4...v3.0.0
 [2.0.4]: https://github.com/officialalexeev/anydb-mcp/compare/v2.0.3...v2.0.4
