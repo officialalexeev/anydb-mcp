@@ -69,12 +69,20 @@ if (SENTINEL) {
   const name = decodeURIComponent(u.pathname.replace(/^\//, '')) || 'mymaster';
 
   for (const [label, node] of [
-    ['{host,port}', { host, port }],
     ['{url}', { url: `redis://${host}:${port}` }],
+    ['{host,port}', { host, port }],
   ]) {
+    // A real command, not just isReady. The previous version of this probe
+    // stopped at isReady and the sentinel reported it connected, which was true
+    // and useless: a sentinel client refreshes its topology from the sentinels
+    // on an interval, so a client that has only lived 70ms has never asked one.
+    // Connecting is not the same as being able to answer.
     await attempt(`sentinel sentinelRootNodes ${label}`,
       () => createSentinel({ name, sentinelRootNodes: [node] }),
-      (c) => `isReady=${c.isReady}`);
+      async (c) => {
+        const pong = await c.sendCommand(['PING']);
+        return `isReady=${c.isReady}, PING -> ${String(pong).slice(0, 50)}`;
+      });
   }
 } else {
   notice('sentinel', 'ANYDB_TEST_REDIS_SENTINEL is not set, so this half did not run');
