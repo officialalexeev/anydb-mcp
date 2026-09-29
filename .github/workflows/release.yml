@@ -66,7 +66,15 @@ jobs:
         registry-url: https://registry.npmjs.org
     - run: npm ci
     - run: npm test
-    - run: npm run verify:package
+    - name: Verify the packed package
+      run: |
+        set -o pipefail
+        node scripts/verify-package.mjs 2>&1 | tee verify-package.log
+    - name: Surface what failed
+      if: failure()
+      run: |
+        grep -E '^[[:space:]]*FAIL' verify-package.log | head -20 | \
+          sed 's/^[[:space:]]*/::error::/' || true
 
   publish:
     name: publish ${{ github.ref_name }}

@@ -208,7 +208,16 @@ jobs:
         node-version: 22.x
         cache: 'npm'
     - run: npm ci
-    - run: node scripts/live-adapters.mjs
+    - name: Drive the real adapters
+      run: |
+        set -o pipefail
+        node scripts/live-adapters.mjs 2>&1 | tee live-adapters.log
+    - name: Surface what failed
+      if: failure()
+      run: |
+        echo "::error title=live adapters::the smoke script failed; see live-adapters.log"
+        grep -E '^[[:space:]]*FAIL' live-adapters.log | head -20 | \
+          sed 's/^[[:space:]]*/::error::/' || true
     - name: Run the live-aware adapter suite
       # The script above is a smoke test; this is the suite. It reads the same
       # four variables and runs the same eight steps per backend, so a driver that
@@ -262,4 +271,20 @@ jobs:
         node-version: 22.x
         cache: 'npm'
     - run: npm ci
-    - run: npm run verify:package
+    - name: Verify the packed package
+      # `pipefail` so the job still fails when the script does, and the log is
+      # kept for the step below to read.
+      run: |
+        set -o pipefail
+        node scripts/verify-package.mjs 2>&1 | tee verify-package.log
+    - name: Surface what failed
+      # Without this the job reports only "exit code 1" and the check that
+      # failed lives in a log behind a sign-in. The script already prints one
+      # indented `FAIL <check>  <detail>` line per failure; these become
+      # annotations on the PR.
+      if: failure()
+      run: |
+        count=$(grep -cE '^[[:space:]]*FAIL' verify-package.log || true)
+        echo "::error title=verify:package::$count check(s) failed"
+        grep -E '^[[:space:]]*FAIL' verify-package.log | head -20 | \
+          sed 's/^[[:space:]]*/::error::/' || true
