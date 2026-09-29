@@ -9,6 +9,13 @@ Release links for every version are at the bottom of this file.
 
 ## [Unreleased]
 
+## [3.0.4] - 2026-09-29
+
+> Two of these are security-relevant and one is a behaviour change. Read the
+> `Changed` section before upgrading: a `redis-cluster://` or
+> `redis-sentinel://` URI is now refused instead of reaching a driver that
+> cannot answer through it.
+
 ### Fixed
 
 - **CRLF line endings could ship inside the published package.** `.gitattributes`
@@ -1119,7 +1126,8 @@ produced one.
 
 ---
 
-[Unreleased]: https://github.com/officialalexeev/anydb-mcp/compare/v3.0.3...HEAD
+[Unreleased]: https://github.com/officialalexeev/anydb-mcp/compare/v3.0.4...HEAD
+[3.0.4]: https://github.com/officialalexeev/anydb-mcp/compare/v3.0.3...v3.0.4
 [3.0.3]: https://github.com/officialalexeev/anydb-mcp/compare/v3.0.2...v3.0.3
 [3.0.2]: https://github.com/officialalexeev/anydb-mcp/compare/v3.0.1...v3.0.2
 [3.0.1]: https://github.com/officialalexeev/anydb-mcp/compare/v3.0.0...v3.0.1
