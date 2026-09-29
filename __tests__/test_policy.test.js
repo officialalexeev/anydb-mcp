@@ -716,14 +716,34 @@ describe('SQLite path policy', () => {
     expect(refused.reason).toMatch(/outside every allowed SQLite path/);
   });
 
-  test('the Windows slash before a drive letter is not a relative path', async () => {
-    const verdict = await checkConnectionPolicy('sqlite:///C:/data/app.db', {
-      env: { ANYDB_ALLOWED_SQLITE_PATHS: 'C:/data' },
-      dns: PUBLIC,
-      log: noLog,
-      platform: 'win32',
-    });
-    expect(verdict.allowed).toBe(true);
+  // `platform: 'win32'` selects the Windows path rules, but the fixture also has
+  // to exist: the allowlist check resolves both sides against the real
+  // filesystem so a symlink cannot leave the tree. A `C:` root cannot be created
+  // off Windows, and a POSIX temp dir under `path.win32` is a path with no drive,
+  // so `resolve` falls back to the working directory. The host-independent half
+  // of this -- an absolute path is not treated as relative -- is covered by the
+  // POSIX cases above and below.
+  const onWindows = process.platform === 'win32' ? test : test.skip;
+
+  onWindows('the Windows slash before a drive letter is not a relative path', async () => {
+    const dir = nodePath.win32.join(os.tmpdir(), `anydb-drive-${process.pid}`);
+    fs.mkdirSync(dir, { recursive: true });
+    try {
+      // The allowlist is the fixture directory, so the only thing under test is
+      // whether `C:/...` was read as an absolute path or resolved against the
+      // working directory. A relative reading would resolve somewhere else and be
+      // refused.
+      const target = nodePath.win32.join(dir, 'app.db').replace(/\\/g, '/');
+      const verdict = await checkConnectionPolicy(`sqlite:///${target}`, {
+        env: { ANYDB_ALLOWED_SQLITE_PATHS: dir },
+        dns: PUBLIC,
+        log: noLog,
+        platform: 'win32',
+      });
+      expect(verdict.allowed).toBe(true);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -667,7 +667,16 @@ describe('toUri', () => {
     expect(store.toUri(store.getEntry('a'))).toBe(expected);
   });
 
-  test('a Windows SQLite path keeps the slash before the drive letter', () => {
+  // A drive letter only exists on a Windows filesystem, and building the
+  // fixture needs one: `writeConfig` writes the file, and with `platform:
+  // 'win32'` over a POSIX temp dir the result is a path with no drive, so
+  // `path.win32.resolve` falls back to the real working directory and the
+  // assertion compares two unrelated strings. The rule under test is host
+  // independent and is covered by the two tests above; this one checks the
+  // drive-letter spelling, which cannot be checked off Windows.
+  const onWindows = process.platform === 'win32' ? test : test.skip;
+
+  onWindows('a Windows SQLite path keeps the slash before the drive letter', () => {
     const dir = path.win32.join(root, 'win');
     const { store } = loaded({ profiles: { a: { path: './data/app.db' } } }, { dir, platform: 'win32' });
     const uri = store.toUri(store.getEntry('a'));
