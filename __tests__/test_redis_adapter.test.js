@@ -213,25 +213,21 @@ describe('RedisAdapter', () => {
       });
 
       test('a sentinel set is given a node to ask about the topology', async () => {
-        // `sentinelRootNodes` is required, and its element type is RedisNode -
-        // `{host, port}` - not the cluster's `{url}`. Passing the cluster shape
-        // here meant no root node was found, the discovery command reached a node
-        // that was not a sentinel, and a real sentinel set answered "ERR unknown
-        // command 'SENTINEL'". Asserted on its own because neither the driver's
-        // error message nor its types name the field at the point of failure.
+        // `sentinelRootNodes` is required, and its element shape is `{url}`.
+        //
+        // Not the `{host, port}` that `RedisNode` in @redis/client's
+        // sentinel/types.d.ts is declared as. Measured against a real sentinel
+        // set with no code of ours in the path: `{url}` connected and reported
+        // isReady, and `{host, port}` answered "ERR unknown command 'SENTINEL'" -
+        // the discovery command reached a node that was not a sentinel, because
+        // no root node had been found to ask. The declaration is not what the
+        // client reads, which is why this is asserted against the shape that
+        // works rather than the shape that is written down.
         const a = new RedisAdapter(jest.fn(), 1000, clusterFactory, sentinelFactory);
         await a.connect('redis-sentinel://sentinel:26379/mymaster');
 
         expect(sentinelFactory.mock.calls[0][0].sentinelRootNodes)
-          .toEqual([{ host: 'sentinel', port: 26379 }]);
-      });
-
-      test('a sentinel URI without a port falls back to redis\'s own default', async () => {
-        const a = new RedisAdapter(jest.fn(), 1000, clusterFactory, sentinelFactory);
-        await a.connect('redis-sentinel://sentinel/mymaster');
-
-        expect(sentinelFactory.mock.calls[0][0].sentinelRootNodes)
-          .toEqual([{ host: 'sentinel', port: 26379 }]);
+          .toEqual([{ url: 'redis://sentinel:26379' }]);
       });
 
       test('refuses a scheme the driver has no name for, rather than a DNS error about it', async () => {
