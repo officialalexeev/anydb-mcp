@@ -389,7 +389,7 @@ deleted. **Neither is exercised against a live server**; see
 **One caveat worth knowing before you rely on the SQLAlchemy spellings.**
 `src/adapters/mysql.js` rewrites exactly four `mysql+<dialect>` forms to `mysql://` —
 `pymysql`, `mysqldb`, `asyncmy`, `aiohttp` — and does not touch `mysql+aiomysql`,
-`mysql+cymysql` or any `mariadb+` form. Those six work anyway, because the adapter
+`mysql+cymysql` or any `mariadb+` form. Those four work anyway, because the adapter
 builds its `mysql2` config from the URL's `hostname`, `port`, `username` and
 `pathname` and never passes the scheme on, and `new URL()` is indifferent to a
 legal scheme token. That is an implicit dependency on driver behaviour rather than

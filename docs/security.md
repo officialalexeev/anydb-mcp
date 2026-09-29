@@ -359,12 +359,16 @@ Two flags, on purpose, and OWASP `MCP02:2025 Privilege Escalation via Scope Cree
 is why.
 
 With one flag, the scope quietly grows: someone grants "writes" for a job that
-appends a row, and the job can now drop a schema. "Destructive" is deliberately
-narrower than "writes" — `DROP`, `TRUNCATE`, `ALTER`, `CREATE`, `RENAME`,
-`GRANT`, `REVOKE` in SQL; the `insert`, `update`, `updateOne`, `replace`, `delete`
-and `deleteOne` MongoDB actions, plus the `$out` and `$merge` stages; `FLUSH*`,
-`SHUTDOWN`, `CONFIG`, `SCRIPT`, `MODULE`, `CLUSTER`, `MIGRATE`, `RESTORE`,
-`REPLICAOF`, `SAVE`, `BGSAVE` in Redis. A `DELETE FROM drafts` is not in it.
+  appends a row, and the job can now drop a schema. "Destructive" is deliberately
+  narrower than "writes" - `DROP`, `TRUNCATE`, `ALTER`, `CREATE`, `RENAME`,
+  `GRANT`, `REVOKE` in SQL; the `drop`, `dropDatabase`, `create` and `createIndex`
+  MongoDB actions, plus the `$out` and `$merge` stages; `FLUSHALL`, `FLUSHDB`,
+  `DEBUG`, `SHUTDOWN`, `CONFIG`, `SCRIPT`, `MODULE`, `CLUSTER`, `MIGRATE`,
+  `RESTORE`, `REPLICAOF`, `SLAVEOF`, `SAVE`, `BGSAVE`, `BGREWRITEAOF` in Redis. A
+  `DELETE FROM drafts` is not in it, and neither is a MongoDB `insert`: the
+  MongoDB set is the shape and existence changes, the equivalents of `DROP` and
+  `CREATE`, not of `INSERT`. All six MongoDB write actions need `readOnly: false`
+  and nothing more, exactly as an `INSERT` does on every SQL backend.
 
 The MongoDB action list is built from `MONGO_WRITE_ACTIONS` in
 `src/core/safety.js` — the read set's complement — rather than written out here.

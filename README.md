@@ -214,12 +214,12 @@ So this server exposes five tools, not five-and-a-helper-per-driver: **the
 database is inferred from the connection, not from the tool name.** Twenty-three
 tools would describe five databases five times over.
 
-The whole `tools/list` payload is **21,330 bytes** for all five tools, which is
+The whole `tools/list` payload is **21,441 bytes** for all five tools, which is
 about 5,300 tokens:
 
 | Tool | Bytes |
 |------|-------|
-| `db_query` | 7,852 |
+| `db_query` | 7,963 |
 | `db_schema` | 4,138 |
 | `db_explain` | 4,216 |
 | `db_health` | 3,569 |
@@ -803,10 +803,12 @@ code (`42P01`, `SQLITE_BUSY`, `11000`, `ECONNREFUSED`) or one of this server's
 
 **Branch on `code`, not on the message.** A driver code is the one field that is
 stable across driver versions, locales and translations; before it was surfaced,
-the only way to recover it was to substring-match English prose — which is exactly
+the only way to recover it was to substring-match English prose - which is exactly
 how `column "timeout" does not exist` came to be classified as a connection
 problem. A classifier that reads sentences cannot tell a missing column from an
-unreachable host when both are English.
+unreachable host when both are English. The one backend that cannot help you here
+is Redis, whose server replies carry no code at all; for that backend, the message
+is the channel, and the `[Redis ...]` prefix tells you which driver spoke.
 
 The same code is in the **text** block, appended to the message on the same line,
 so a model reading the text and a client reading the structured result see the same
@@ -818,10 +820,19 @@ SUGGESTION: The referenced object does not exist. Call db_schema to see what thi
 ```
 
 It goes in both places on purpose. `structuredContent.error.code` is the field to
-branch on but it is optional — a refusal this server raised before touching a
-database has no driver code — while the text block is read by every model and by
-every human reading a transcript, and it is the only place the code is guaranteed
-to sit beside the message a driver produced.
+branch on, but it is optional, and it is `null` for two separate classes of failure
+— not one. A refusal this server raised before touching a database has no driver
+code, and neither does a driver error that arrives without one of its own. Redis is
+the case that matters: `redis@6` builds every server reply into a `SimpleError`
+straight from the wire string and puts no `code` on it, so `WRONGTYPE`, `NOAUTH`,
+`MOVED`, `CLUSTERDOWN` and the rest arrive with `code: null` while the server's own
+word is still in the message. For Redis, branch on the message or on the first token
+after `[Redis`. The other four drivers do supply codes for server errors, and socket
+errors (`ECONNRESET`, `ETIMEDOUT`) carry one on every backend including Redis.
+
+The text block is read by every model and by every human reading a transcript, and
+it is the only place the code is guaranteed to sit beside the message a driver
+produced — which is why it stays a second channel rather than a duplicate.
 
 Every failure is an **in-band tool error**, not a protocol failure, and the
 conversation continues. Driver codes are mapped to plain descriptions for the
@@ -848,7 +859,7 @@ deliberately narrower than "writes":
 | | Counted as destructive |
 |---|-----------------------|
 | SQL | `DROP`, `TRUNCATE`, `ALTER`, `CREATE`, `RENAME`, `GRANT`, `REVOKE` — anywhere in the statement, not only at the start |
-| MongoDB | the `insert`, `update`, `updateOne`, `replace`, `delete`, `deleteOne` actions; the `$out` and `$merge` stages |
+| MongoDB | the `drop`, `dropDatabase`, `create` and `createIndex` actions - shape and existence, the equivalents of `DROP` and `CREATE`, not of `INSERT`; the `$out` and `$merge` stages. None of the six write actions (`insert`, `update`, `updateOne`, `replace`, `delete`, `deleteOne`) is destructive: `readOnly: false` alone covers them, as it does an `INSERT` on every SQL backend. |
 | Redis | `FLUSHALL`, `FLUSHDB`, `SHUTDOWN`, `DEBUG`, `CONFIG`, `SCRIPT`, `MODULE`, `CLUSTER`, `MIGRATE`, `RESTORE`, `REPLICAOF`, `SLAVEOF`, `SAVE`, `BGSAVE`, `BGREWRITEAOF` |
 
 A `DELETE FROM drafts` is **not** destructive. With one flag, the scope would
@@ -1371,7 +1382,7 @@ changes a line of client code or a host configuration.
 | `db_schema` | tables and columns | `detail: "summary" \| "full"`, pagination |
 | Argument validation | type checks only | the full `inputSchema` enforced: unknown properties, ranges and `enum`s refused |
 | Gates | `readOnly` | `readOnly` **and** `allowDestructive` |
-| Schemes | no `mariadb://`, no `mongodb+srv://` | 20, including `mariadb://`, `mongodb+srv://`, `redis-cluster://`, `redis-sentinel://` and the six `mysql+`/`mariadb+` SQLAlchemy spellings |
+| Schemes | no `mariadb://`, no `mongodb+srv://` | 20, including `mariadb://`, `mongodb+srv://`, `redis-cluster://`, `redis-sentinel://` and the eight `mysql+`/`mariadb+` SQLAlchemy spellings |
 | MongoDB `action` | 8 values | 11 — `updateOne`, `replace` and `deleteOne` are now reachable |
 | MongoDB `replace` | did not exist | takes `document`; a *replacement*, not an update document |
 | `db_explain` for MongoDB | unreachable — the branch required `collection` and the schema did not declare it | `collection` is declared and required there |
@@ -1565,7 +1576,7 @@ workaround that rewrote a URI to `mysql://` is no longer needed and can be remov
   is an implicit dependency on driver behaviour — `new URL()` being indifferent to
   a legal scheme token — rather than a contract this project states. A future
   adapter that wanted to read the scheme, or a driver that started rejecting
-  unknown ones, would break these six with no local test failing. The durable fix
+  unknown ones, would break these four with no local test failing. The durable fix
   is to normalise the whole set in the adapter rather than to rely on the scheme
   being ignored; it is recorded here so the next maintainer does not have to
   rediscover why the obvious fix is missing.

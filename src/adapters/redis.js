@@ -558,11 +558,20 @@ function markTruncated(rows, truncated) {
 /**
  * A server error, rewritten to say something a caller can act on.
  *
- * `cause` is the driver's own error, so its `code` (`ECONNRESET`, `MOVED`,
- * `CLUSTERDOWN`, …) is still reachable one link down and the stack still leads
- * somewhere. Rebuilding the error as a bare `Error` threw both away, which is what
- * left `registry.isDeadConnectionError` matching English to work out whether a
+ * `cause` is the driver's own error and the stack still leads somewhere. Rebuilding
+ * the error as a bare `Error` threw that away, which is what left
+ * `registry.isDeadConnectionError` matching English to work out whether a
  * connection had gone.
+ *
+ * What `cause` does *not* give back is a code for a server reply. An earlier
+ * version of this comment listed `MOVED` and `CLUSTERDOWN` as examples of codes
+ * "reachable one link down", and they are not: `redis@6` builds every server
+ * reply into a `SimpleError` straight from the wire string, with no `code` and no
+ * `errno` on it, so `WRONGTYPE`, `NOAUTH`, `MOVED` and `CLUSTERDOWN` all arrive
+ * with nothing to copy. Only socket-level failures (`ECONNRESET`, `ETIMEDOUT`)
+ * carry a code, because those are Node errnos rather than replies. The message is
+ * therefore the only channel for a Redis server error, and the documentation says
+ * so rather than promising a field that is always null.
  */
 function describeError(err, timeoutMs) {
   const message = (err && err.message) || String(err);

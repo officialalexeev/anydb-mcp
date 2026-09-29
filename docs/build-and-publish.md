@@ -53,13 +53,14 @@ This document is not shipped in the npm tarball.
 
   npm does not validate this when you save it — a mismatch is only visible when a
   publish fails with `ENEEDAUTH` — so check the spelling, and check it before you
-  push the tag rather than after. Note the workflow also passes
-  `NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}`: with trusted publishing configured
-  that variable is unused, and without it the publish falls back to a
-  long-lived token, which is a 2FA prompt in a non-interactive runner.
-- **`secrets.NPM_TOKEN` in the repository**, if you would rather not rely on
-  trusted publishing at all. Either route publishes; only one of them is
-  tokenless.
+  push the tag rather than after.
+- **Nothing else.** The publish step deliberately sets `NODE_AUTH_TOKEN=` (empty).
+  npm prefers a real token over the OIDC exchange, and an unset secret still
+  arrives as an empty string, so passing `secrets.NPM_TOKEN` there is the
+  documented way to defeat trusted publishing — and doing so is what produced
+  every `ENEEDAUTH` failure in 3.0.2. There is no token route in the workflow,
+  and no `secrets.NPM_TOKEN` in the repository. The OIDC identity is the only
+  credential the publish job has.
 
 ---
 

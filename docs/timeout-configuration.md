@@ -188,9 +188,15 @@ driver document and every log aggregator uses, so it is unsurprising to parse.
 
 The code appears in the text block as well as in `structuredContent.error.code`,
 which is the field to *branch* on and which is `null` when there is none. A client
-reading only `code` has nothing for a large class of failures — every refusal this
-server raised before touching a database — which is why the text is not a
-duplicate but a second channel.
+reading only `code` has nothing for two classes of failures, not one: every refusal
+this server raised before touching a database, and every driver error that arrives
+without a code of its own. Redis is the one that matters in practice — `redis@6`
+builds each server reply into a `SimpleError` from the wire string and sets no `code`
+on it, so `WRONGTYPE`, `NOAUTH`, `MOVED` and `CLUSTERDOWN` all arrive with
+`code: null` and the server's word only in the message. For Redis, branch on the
+message, or on the first token after `[Redis`. Socket errors such as `ECONNRESET` and
+`ETIMEDOUT` do carry a code on every backend. That is why the text is not a duplicate
+but a second channel.
 
 | Message | Cause | Do |
 |---------|-------|----|
