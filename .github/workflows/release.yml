@@ -76,10 +76,8 @@ jobs:
     environment: npm
     permissions:
       contents: read
-      # For npm provenance. The token is minted from the workflow's OIDC identity,
-      # exchanged for a short-lived publish token, and never stored: this is what
-      # removes the 2FA prompt from the release path and the reason a leaked
-      # `NPM_TOKEN` is no longer the worst thing that could happen to this repo.
+      # The only credential this job has. The CLI exchanges this identity for a
+      # short-lived publish token scoped to this package, and nothing is stored.
       id-token: write
 
     steps:
@@ -89,8 +87,13 @@ jobs:
     - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
       with:
         node-version: 22.x
-        cache: 'npm'
         registry-url: https://registry.npmjs.org
+        # No cache in the publish job. npm's guidance is explicit that a release
+        # build should not use the package-manager cache, and the reason is the
+        # failure mode: a cached tree from an earlier commit, a lockfile that no
+        # longer matches it, and a tarball built from neither. The verify job
+        # above caches freely because a stale tree there costs a red test rather
+        # than a published release.
 
     - name: Refuse to publish a version that already exists
       # The cheapest guard against the failure this workflow can cause. A re-run
@@ -108,18 +111,20 @@ jobs:
         fi
 
     - name: Publish with provenance
-      # `--provenance` is what links this tarball to this workflow run and this
-      # commit. It is not decoration: this package holds database credentials, and
-      # provenance is the difference between "npm says this is anydb-mcp 3.0.0"
-      # and "npm says this is anydb-mcp 3.0.0, built from commit X in the
-      # officialalexeev/anydb-mcp repository by a workflow with these permissions".
+      # No NODE_AUTH_TOKEN, and that is deliberate. With trusted publishing
+      # configured, the CLI detects the OIDC environment and exchanges its
+      # identity for a short-lived publish token. Setting NODE_AUTH_TOKEN here
+      # -- which an earlier revision of this file did, from secrets.NPM_TOKEN --
+      # is the documented way to *defeat* that: npm prefers a real token, and an
+      # unset secret passes an empty string. Either way the run falls back to
+      # whatever is in the user config, which on a runner is nothing, and the
+      # job fails with ENEEDAUTH. A token is only needed here for *installing*
+      # private dependencies, and this package has none.
       #
-      # `NODE_AUTH_TOKEN` is required for `--provenance` to be accepted even though
-      # the credential itself is an OIDC exchange; npm's docs are explicit that
-      # the variable has to be set.
+      # `--provenance` is redundant with trusted publishing -- npm attaches an
+      # attestation automatically -- but stating it is harmless and keeps the
+      # intent visible if the publish path ever changes.
       run: npm publish --provenance --access public
-      env:
-        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   verify-published:
     name: verify what is on the registry
