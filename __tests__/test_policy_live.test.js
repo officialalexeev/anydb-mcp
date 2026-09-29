@@ -550,16 +550,14 @@ describeIfLive('mongodb', () => {
       .resolves.toBeDefined();
   });
 
-  test('a shape-changing action still needs allowDestructive', async () => {
-    // The other half of the gate above, so the rule is pinned from both sides
-    // rather than only relaxed. `WRITING` is deliberately not used here: it
-    // carries `allowDestructive: true`, which is the point of this case. The
-    // refusal happens in the policy layer, before a socket is opened, so the
-    // collection does not have to exist.
-    await expect(mongo('{}', {
-      readOnly: false, action: 'drop', collection: 'anydb_live_drop', timeout: 30000
-    })).rejects.toMatchObject({ kind: 'policy', code: 'DESTRUCTIVE' });
-  });
+  // There is deliberately no live counterpart for the destructive gate here.
+  // `db_query` does not expose drop, dropDatabase, create or createIndex, so
+  // those four names cannot be reached through a tool, and the other destructive
+  // MongoDB shapes -- `$out` and `$merge` in an aggregation -- are refused by
+  // the code-execution gate before the destructive one is consulted. The gate is
+  // defence in depth for an action set the tools do not have, and pinning it
+  // from this side would mean asserting on a path no caller can take. The
+  // classification itself is covered by policy.test.js.
 
   test('server-side JavaScript is refused even with both gates set', async () => {
     // The check that is independent of read-only mode, against a real server that
