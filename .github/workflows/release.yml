@@ -39,6 +39,11 @@ on:
   # whatever the tag says rather than whatever the form said.
   workflow_dispatch:
 
+# The floor npm documents for trusted publishing: node 22.14.0 and npm CLI
+# 11.5.1. The publish job asserts both before it touches the registry, because
+# npm below 11.5.1 has no OIDC code path at all: it never attempts the exchange
+# and falls back to token auth, which is exactly the ENEEDAUTH this workflow
+# spent four failed runs producing on a correctly configured package.
 permissions:
   contents: read
 
@@ -61,7 +66,7 @@ jobs:
         ref: ${{ github.ref }}
     - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
-        node-version: 22.x
+        node-version: 24.x
         cache: 'npm'
         registry-url: https://registry.npmjs.org
     - run: npm ci
@@ -94,7 +99,18 @@ jobs:
         ref: ${{ github.ref }}
     - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
-        node-version: 22.x
+        # 24.x, not 22.x. This is the fix for ENEEDAUTH.
+        #
+        # npm documents that trusted publishing needs CLI 11.5.1 or later, and
+        # `22.x` resolves to node 22.23.3, which ships npm 10.9.9. npm 10 has no
+        # OIDC support, so it never tried the exchange, never found a token, and
+        # reported the result as a missing credential. Nothing about the trusted
+        # publisher on npmjs.com was wrong, and nothing about the OIDC token was
+        # wrong; the CLI was three years too old to read either.
+        #
+        # node 24.x resolves to 24.21.0 with npm 11.19.0. The assertion step
+        # below keeps this honest if the pin is ever loosened.
+        node-version: 24.x
         # No `registry-url` here, and that is load-bearing.
         #
         # `registry-url` makes setup-node write a project `.npmrc` containing
@@ -104,6 +120,10 @@ jobs:
         # that trusted publishing depends on. The symptom is exactly what this job
         # produced: E404 on PUT, which is npm's way of saying "I could not
         # authenticate" rather than "this version exists".
+        #
+        # npm's own documentation example sets `registry-url`; doing so here
+        # reintroduces that failure, and the step below deletes the file again in
+        # case the image or a previous run left one behind.
         #
         # Nothing in this job needs the registry configured -- there are no private
         # dependencies -- and the default registry is npmjs.org anyway.
@@ -121,6 +141,65 @@ jobs:
         # not on disk.
     - run: npm ci
 
+    - name: Assert the runtime can do trusted publishing
+      # Checked before anything is published, and against npm's own documented
+      # numbers rather than a comment that can drift. A publish on a CLI without
+      # OIDC support fails as ENEEDAUTH, which is indistinguishable from a
+      # permissions problem and is what sent this workflow down the wrong path
+      # for four runs.
+      #
+      # Single-quoted heredoc: the version strings come from the runtime, and
+      # letting bash expand them first would print an empty version in the one
+      # message that exists to name a version.
+      run: |
+        node --input-type=module <<'EOF'
+        const atLeast = (v, floor) => {
+          const p = v.split('.').map(Number);
+          const f = floor.split('.').map(Number);
+          for (let i = 0; i < 3; i++) {
+            if (p[i] !== f[i]) return p[i] > f[i];
+          }
+          return true;
+        };
+        const node = process.versions.node;
+        const npm = (await import('node:child_process')).execSync('npm --version').toString().trim();
+        console.log(`::notice title=runtime::node ${node}, npm ${npm}`);
+
+        let ok = true;
+        if (!atLeast(node, '22.14.0')) {
+          console.log(`::error::node ${node} is below 22.14.0, npm's floor for trusted publishing`);
+          ok = false;
+        }
+        if (!atLeast(npm, '11.5.1')) {
+          console.log(`::error::npm ${npm} is below 11.5.1 and cannot do trusted publishing. Pin node-version to 24.x.`);
+          ok = false;
+        }
+        process.exit(ok ? 0 : 1);
+        EOF
+
+    - name: Remove any .npmrc that would suppress the OIDC exchange
+      # setup-node's registry-url writes a token placeholder into .npmrc, which
+      # makes npm believe it is authenticated and skip the exchange entirely.
+      # The option is not set in this job, but the file outlives a cancelled run.
+      run: |
+        if [ -f .npmrc ]; then
+          echo "::notice title=stale .npmrc::removing it so npm falls through to the OIDC exchange"
+          rm -f .npmrc
+        fi
+
+    - name: Confirm npm will accept this workflow's identity
+      # Runs the exchange for real, before `npm publish`, and fails the job if
+      # npm will not hand over a publish token. Publishing first and diagnosing
+      # afterwards means the version is already on the registry when the
+      # mismatch becomes visible, and a 3.0.3 published from a broken identity is
+      # worse than a 3.0.3 that was not published.
+      #
+      # This has to run here rather than in a workflow of its own: npm matches
+      # the registered "Workflow filename" against the token's `job_workflow_ref`
+      # claim, so a check living in any other file tests an identity that no
+      # trusted publisher is ever registered for and always reports a mismatch.
+      run: node scripts/oidc-check.mjs --require
+
     - name: Refuse to publish a version that already exists
       # The cheapest guard against the failure this workflow can cause. A re-run
       # of a successful tag should stop here, not at npm.
@@ -135,34 +214,6 @@ jobs:
           echo "::error::anydb-mcp@$version is already on the registry. Deprecate it or move the tag."
           exit 1
         fi
-
-    - name: Report the OIDC identity npm will match against
-      # npm matches the token's `sub` claim against the trusted publisher entry on
-      # npmjs.com, and the mismatch is reported as ENEEDAUTH with no detail. The
-      # claim is not a secret -- it is the workflow's identity, already public in
-      # the run -- and printing it turns "the configuration is wrong somewhere"
-      # into "the environment name in the config is `X` and the subject is `Y`".
-      #
-      # Emitted as annotations rather than stdout, because stdout is in a log
-      # behind a sign-in and that is the whole reason this step exists.
-      #
-      # Only the decoded header and payload are read. The signature is not
-      # checked and the token itself is never echoed.
-      run: |
-        set -euo pipefail
-        url="${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org"
-        curl -sSf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "$url" \
-          | node -e "
-            let s=''; process.stdin.on('data',d=>s+=d).on('end',()=>{
-              const p=JSON.parse(Buffer.from(s.trim().split('.')[1],'base64url'));
-              const line=(k,v)=>console.log('::notice title=OIDC '+k+'::'+String(v));
-              line('sub', p.sub);
-              line('aud', JSON.stringify(p.aud));
-              line('repository', p.repository);
-              line('environment_name', JSON.stringify(p.environment_name ?? null));
-              line('what npm expects', 'repo:officialalexeev/anydb-mcp:environment:npm');
-            });
-          "
 
     - name: Publish with provenance
       # No NODE_AUTH_TOKEN, and that is deliberate. With trusted publishing
@@ -213,7 +264,7 @@ jobs:
     # so this job tests what npm actually serves rather than a local build of it.
     - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
-        node-version: 22.x
+        node-version: 24.x
 
     # A full checkout, deliberately. `verify-package.mjs --from-registry` installs
     # the *published* tarball into a temp directory, but it also reads this
