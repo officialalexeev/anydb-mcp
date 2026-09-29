@@ -12,23 +12,10 @@
 # The version bump, the CHANGELOG entry and the tag are still a maintainer's job,
 # by hand. This workflow starts at the tag.
 #
-# RECONCILIATION NEEDED WITH THE MANUAL GUIDE
-# ------------------------------------------
-# `docs/publication_guide_ru.md` part 4 and `docs/build-and-publish.md` section 5
-# say to run `npm publish` at a terminal, approve the 2FA prompt in a browser, and
-# then run `verify-package.mjs --from-registry` by hand. Every one of those three
-# steps is now either done here or is the step this workflow waits for. The
-# documented procedure and this workflow must not both be followed for one
-# release: a manual `npm publish` followed by this workflow's publish step fails
-# with `E403 Cannot publish over the previously published version`, and the second
-# failure is the confusing one because the first publish actually worked.
-#
-# The documentation owner should therefore reduce part 4 to "tag, push, watch
-# Actions", and keep the 2FA and unpublish procedures as what they are: the
-# recovery path for when this workflow fails, not part of the happy path. The
-# 2FA note changes character -- it is no longer needed for a publish (trusted
-# publishing with an OIDC token is), but it is still needed for `npm unpublish` and
-# for `npm owner add`, and that is the distinction the guide should make.
+# The 2FA note changes character once trusted publishing is configured -- it is no
+# longer needed for a publish, but it is still needed for `npm unpublish` and for
+# `npm owner add`, and that is the distinction `docs/build-and-publish.md` and
+# `docs/publication_guide_ru.md` draw.
 name: Publish
 
 on:

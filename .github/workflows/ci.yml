@@ -110,7 +110,11 @@ jobs:
       # anything. No codecov/coveralls token is configured, and adding a third
       # party to the release path of a package that handles database credentials
       # is not a decision this file should make quietly.
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      # v7.0.1. The previous pin was a v4 commit, and v4 runs on Node 20: every
+      # run logged "Node.js 20 is deprecated ... actions/upload-artifact@ea165f8d is
+      # being forced to run on Node.js 24". It still worked, which is exactly why
+      # the warning is noise nobody acts on until the runner stops forcing it.
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: coverage-${{ github.run_id }}
         path: coverage/
