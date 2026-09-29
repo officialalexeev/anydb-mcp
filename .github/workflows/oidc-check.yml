@@ -7,7 +7,7 @@
 # npmjs.com, and the only way to see why it does not match is to ask npm.
 #
 # This does the exchange and stops. It publishes nothing: the exchange endpoint
-# hands back a token without consuming it, and there is no `npm publish` in this
+# returns a token without consuming it, and there is no `npm publish` in this
 # file. Manual dispatch only, so a broken configuration cannot touch a release.
 name: check trusted publishing
 
@@ -25,49 +25,14 @@ jobs:
     name: exchange an OIDC token for a publish token
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # No `environment`, so the subject below is the ref form. A successful
-    # exchange here proves the credentials, the package and the audience; it
-    # does not prove the environment name, which is the field most likely to be
-    # the problem, and the run says so.
+    # No `environment:` here on purpose, so the subject is the ref form. A
+    # successful exchange proves the credentials, the package and the audience.
+    # It does not exercise the Environment name field -- the most likely
+    # mismatch -- and the output says so rather than claiming more than it knows.
     steps:
-    - name: Exchange the identity
-      run: |
-        set -uo pipefail
-        say() { echo "::notice title=$1::$2"; }
-
-        url="${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org"
-        token="$(curl -sSf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "$url" \
-                 | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(s.trim().split('.')[1]))" \
-                 | base64 -d 2>/dev/null)" || { say "minted" "could not read the OIDC token"; exit 0; }
-
-        say "subject"   "$(node -p "JSON.parse(process.argv[1]).sub" "$token")"
-        say "audience"  "$(node -p "JSON.stringify(JSON.parse(process.argv[1]).aud)" "$token")"
-        say "repository" "$(node -p "JSON.parse(process.argv[1]).repository" "$token")"
-
-        body="$(mktemp)"
-        code=$(curl -sS -o "$body" -w '%{http_code}' -X POST \
-          -H "Authorization: Bearer $(curl -sSf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "$url" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(s.trim()))")" \
-          -H 'Content-Type: application/json' \
-          -d '{}' \
-          "https://registry.npmjs.org/-/v1/oidc/token/exchange/package/anydb-mcp")
-
-        say "exchange HTTP" "$code"
-        say "exchange body" "$(head -c 400 "$body" | tr '\n' ' ')"
-
-        if [ "$code" = "200" ]; then
-          say "result" "the credentials are accepted. If a release still fails, the mismatch is the Environment name field, which this job does not exercise."
-        else
-          say "result" "npm rejected the identity. The Trusted Publisher entry on npmjs.com does not match this workflow."
-          {
-            echo "::error title=trusted publisher mismatch::"
-            echo "::error::expected sub : repo:officialalexeev/anydb-mcp:environment:npm"
-            echo "::error::expected aud : npm:registry.npmjs.org"
-            echo "::error::check, in this order on npmjs.com/settings/anydb-mcp:"
-            echo "::error::  1. Organization or user = officialalexeev"
-            echo "::error::  2. Repository         = anydb-mcp"
-            echo "::error::  3. Workflow filename  = release.yml  (filename only, with .yml, no path)"
-            echo "::error::  4. Environment name   = npm            (the subject carries :environment:npm)"
-            echo "::error::  5. Allowed actions    = npm publish    (since 2026-09-03 new entries allow stage only)"
-            echo "::error::an entry cannot be edited -- delete it and create it again."
-          } >> "$GITHUB_OUTPUT"
-        fi
+    - name: Ask npm whether it accepts this identity
+      # Base64url, so the payload is decoded in Node. Doing it in the shell with
+      # `base64 -d` silently produced nothing: the alphabet is `-_` and there is
+      # no padding, and the first version of this step failed on that with a
+      # cheerful "could not read the OIDC token".
+      run: node scripts/oidc-check.mjs
