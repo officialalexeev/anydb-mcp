@@ -37,7 +37,6 @@ MASTER_PORT=6379
 REPLICA_PORT=6380
 SENTINEL_PORT=26379
 MASTER_NAME=mymaster
-SENTINEL_CONF=/tmp/anydb-sentinel.conf
 NAMES=()
 
 log()  { echo "::notice title=redis-topologies::$1"; }
@@ -135,25 +134,19 @@ start_sentinel_set() {
   wait_for anydb-sentinel-replica "$REPLICA_PORT" || fail 'the replica never answered PING'
 
   # The sentinel has to be told the master as an address the *client* can reach.
-  # 127.0.0.1 is that address here, because the client runs on the runner. The
-  # config goes on the host, not inside another container: it is bind-mounted
-  # into the sentinel, and a file written into the master's filesystem would not
-  # exist at that path.
+  # 127.0.0.1 is that address here, because the client runs on the runner.
   #
-  # 666 because a sentinel rewrites its own config on startup and then again on
-  # every topology change, as the `redis` user inside the container, which is not
-  # the uid that created the file on the runner. A mount it cannot write makes
-  # the sentinel exit, and the container's own log is the only place that says so.
-  cat > "$SENTINEL_CONF" <<EOF
-sentinel monitor $MASTER_NAME 127.0.0.1 $MASTER_PORT
-sentinel down-after-milliseconds $MASTER_NAME 5000
-sentinel failover-timeout $MASTER_NAME 10000
-EOF
-  chmod 666 "$SENTINEL_CONF"
-
+  # The config is written *inside* the container rather than bind-mounted, and
+  # that is the whole reason the first two attempts produced no sentinel at all.
+  # A sentinel rewrites its own config on startup: it writes a sibling `.tmp` file
+  # and renames it over the original, so it needs write permission on the
+  # *directory*, not just on the file. A bind mount into `/usr/local/etc/redis`
+  # is a directory the image's entrypoint never chowns, so the rewrite failed,
+  # redis-server exited, and `--rm` removed the container - leaving only an exit
+  # code with nothing in it. Writing into `/data` and exec'ing from there needs no
+  # mount, no host file and no permission arithmetic.
   docker run -d --rm --name anydb-sentinel --network host \
-    -v "$SENTINEL_CONF:/usr/local/etc/redis/sentinel.conf" \
-    redis:7-alpine redis-server /usr/local/etc/redis/sentinel.conf --port "$SENTINEL_PORT" >/dev/null \
+    redis:7-alpine sh -c "printf 'sentinel monitor $MASTER_NAME 127.0.0.1 $MASTER_PORT\nsentinel down-after-milliseconds $MASTER_NAME 5000\nsentinel failover-timeout $MASTER_NAME 10000\n' > /data/sentinel.conf && exec redis-server /data/sentinel.conf --port $SENTINEL_PORT" >/dev/null \
     || fail 'the sentinel container refused to start'
   wait_for anydb-sentinel "$SENTINEL_PORT" || fail 'the sentinel never answered PING'
   local i=0
@@ -188,7 +181,6 @@ case "${1:-}" in
                 anydb-sentinel anydb-sentinel-master anydb-sentinel-replica; do
       docker rm -f "$name" >/dev/null 2>&1 || true
     done
-    rm -f "$SENTINEL_CONF"
     ;;
   *)
     echo "usage: $0 up <uri-file> | down" >&2
