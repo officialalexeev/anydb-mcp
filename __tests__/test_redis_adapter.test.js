@@ -176,7 +176,51 @@ describe('RedisAdapter', () => {
 
         expect(sentinelFactory).toHaveBeenCalled();
         expect(sentinelFactory.mock.calls[0][0].name).toBe('mymaster');
-        expect(sentinelFactory.mock.calls[0][0].sentinel).toMatchObject({ password: 'pw' });
+        // Credentials go to the sentinels *and* to the master/replica clients,
+        // which are two separate connections to two separate processes. The old
+        // shape passed them as `sentinel` and `nodeClient`, neither of which this
+        // driver version reads, so the password reached nothing.
+        expect(sentinelFactory.mock.calls[0][0].sentinelClientOptions).toMatchObject({ password: 'pw' });
+        expect(sentinelFactory.mock.calls[0][0].nodeClientOptions).toMatchObject({ password: 'pw' });
+      });
+
+      test('passes the driver the option names it actually reads, for both topologies', async () => {
+        // The strongest guard available without a cluster: hand the options to the
+        // *real* `createSentinel` and `createCluster` and require that they are
+        // accepted. A mock cannot do this -- it records whatever it is given,
+        // which is how `sentinel:` and `nodeClient:` survived here for so long.
+        // The real factory throws `TypeError: Cannot read properties of undefined
+        // (reading '0')` on a sentinel set with no `sentinelRootNodes`, which is
+        // precisely the bug, so this fails loudly on the old shape.
+        const { createSentinel, createCluster: realCluster } = jest.requireActual('redis');
+        const accept = (factory, options) => {
+          const client = factory(options);
+          if (client && typeof client.close === 'function') return client.close().catch(() => {});
+          return Promise.resolve();
+        };
+
+        for (const [uri, factory] of [
+          ['redis-sentinel://:pw@sentinel:26379/mymaster', createSentinel],
+          ['redis-cluster://:pw@node1:7000', realCluster],
+        ]) {
+          const a = new RedisAdapter(jest.fn(), 1000, clusterFactory, sentinelFactory);
+          await a.connect(uri);
+          const built = uri.startsWith('redis-sentinel')
+            ? sentinelFactory.mock.calls[0][0]
+            : clusterFactory.mock.calls[0][0];
+          await expect(accept(factory, built)).resolves.toBeUndefined();
+        }
+      });
+
+      test('a sentinel set is given a node to ask about the topology', async () => {
+        // `sentinelRootNodes` is required and was absent for the whole life of
+        // this branch. Asserted on its own as well as above, because the failure
+        // message from the driver does not name the field.
+        const a = new RedisAdapter(jest.fn(), 1000, clusterFactory, sentinelFactory);
+        await a.connect('redis-sentinel://sentinel:26379/mymaster');
+
+        expect(sentinelFactory.mock.calls[0][0].sentinelRootNodes)
+          .toEqual([{ url: 'redis://sentinel:26379' }]);
       });
 
       test('refuses a scheme the driver has no name for, rather than a DNS error about it', async () => {

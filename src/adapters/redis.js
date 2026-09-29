@@ -218,6 +218,7 @@ export class RedisAdapter extends BaseAdapter {
     const username = decodeURIComponent(url.username);
     const auth = password ? { username: username || undefined, password } : undefined;
     const socket = { connectTimeout: this.connectTimeout };
+    const endpoint = `redis://${url.hostname}${url.port ? `:${url.port}` : ''}`;
 
     this.cluster = true;
     this.client = sentinel
@@ -225,14 +226,27 @@ export class RedisAdapter extends BaseAdapter {
         // The path is the master's name, which is how a sentinel set is
         // addressed: `redis-sentinel://:pass@sentinel:26379/mymaster`.
         name: decodeURIComponent(url.pathname.replace(/^\//, '')) || 'mymaster',
-        ...(auth ? { sentinel: { ...auth, socket } } : {}),
-        nodeClient: { socket },
+        // Required, and the address the sentinels themselves are reached at. The
+        // option was missing for the whole life of this branch, so
+        // `redis-sentinel://` could not have connected even once: the driver had
+        // no node to ask about the topology, and threw while reading the
+        // undefined list.
+        sentinelRootNodes: [{ url: endpoint }],
+        // Credentials and timeouts for the *master and replicas*, and separately
+        // for the *sentinels*. Those are two different connections to two
+        // different processes, and a sentinel set routinely authenticates them
+        // differently. These were previously passed as `nodeClient` and
+        // `sentinel`, which are not fields this driver version reads at all, so
+        // the credentials reached nothing.
+        ...(auth
+          ? { nodeClientOptions: { ...auth, socket }, sentinelClientOptions: { ...auth, socket } }
+          : { nodeClientOptions: { socket }, sentinelClientOptions: { socket } }),
       })
       : factory({
-        rootNodes: [{ url: `redis://${url.hostname}${url.port ? `:${url.port}` : ''}` }],
-        // Credentials and TLS belong in `defaults`: the root node is only how
-        // the topology is discovered, and its settings are not inherited by the
-        // connections to the nodes it finds.
+        // `rootNodes` is how the topology is discovered and, per the driver's own
+        // documentation, is not inherited by the connections to the nodes it
+        // finds, which is why credentials go in `defaults` below.
+        rootNodes: [{ url: endpoint }],
         defaults: { ...(auth ? { username: auth.username, password: auth.password } : {}), socket },
       });
 

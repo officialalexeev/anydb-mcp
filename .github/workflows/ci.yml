@@ -292,3 +292,60 @@ jobs:
         echo "::error title=verify:package::$count check(s) failed"
         grep -E '^[[:space:]]*FAIL' verify-package.log | head -20 | \
           sed 's/^[[:space:]]*/::error::/' || true
+
+  # Redis Cluster and Redis Sentinel, against real ones.
+  #
+  # Its own job because `services:` maps one container to one port, and neither
+  # of these is one container: a cluster is three masters, a sentinel set is a
+  # master, a replica and a sentinel. The script starts them with
+  # `--network host` so the addresses the nodes agree on and the addresses the
+  # client dials are the same 127.0.0.1.
+  #
+  # This job is here because the sentinel path was broken and nothing could see
+  # it. `connectCluster` passed `sentinel` and `nodeClient` to `createSentinel` -
+  # names this driver version does not read - and left out `sentinelRootNodes`,
+  # which is required, so the real factory threw while reading an undefined list.
+  # The unit tests passed because they assert against a mock, and a mock records
+  # whatever it is handed: it cannot tell you a field does not exist. Only the
+  # driver can, and only against a real topology.
+  redis-topologies:
+    name: redis topologies
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: 22.x
+        cache: 'npm'
+    - run: npm ci
+
+    - name: Start the cluster and the sentinel set
+      run: bash scripts/ci-redis-topologies.sh up redis-topologies.env
+
+    - name: Drive them through the adapter
+      # `pipefail` so a failing test fails the step, and the log is teed for the
+      # step below to turn into annotations.
+      run: |
+        set -o pipefail
+        set -a
+        . ./redis-topologies.env
+        set +a
+        npx jest __tests__/test_redis_topologies_live.test.js 2>&1 | tee redis-topologies.log
+
+    - name: Surface what failed
+      if: failure()
+      run: |
+        {
+          echo "::error title=redis topologies failed::see below"
+          grep -E '●|Cannot|Error:' redis-topologies.log | head -20 | \
+            sed 's/^/::error::/' || true
+        }
+
+    # `always()`, and after the tests: a job that fails must not leave six
+    # containers behind, because the next job on the same host would find the
+    # ports taken and fail for the wrong reason.
+    - name: Stop the cluster and the sentinel set
+      if: always()
+      run: bash scripts/ci-redis-topologies.sh down
