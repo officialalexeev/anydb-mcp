@@ -213,14 +213,25 @@ describe('RedisAdapter', () => {
       });
 
       test('a sentinel set is given a node to ask about the topology', async () => {
-        // `sentinelRootNodes` is required and was absent for the whole life of
-        // this branch. Asserted on its own as well as above, because the failure
-        // message from the driver does not name the field.
+        // `sentinelRootNodes` is required, and its element type is RedisNode -
+        // `{host, port}` - not the cluster's `{url}`. Passing the cluster shape
+        // here meant no root node was found, the discovery command reached a node
+        // that was not a sentinel, and a real sentinel set answered "ERR unknown
+        // command 'SENTINEL'". Asserted on its own because neither the driver's
+        // error message nor its types name the field at the point of failure.
         const a = new RedisAdapter(jest.fn(), 1000, clusterFactory, sentinelFactory);
         await a.connect('redis-sentinel://sentinel:26379/mymaster');
 
         expect(sentinelFactory.mock.calls[0][0].sentinelRootNodes)
-          .toEqual([{ url: 'redis://sentinel:26379' }]);
+          .toEqual([{ host: 'sentinel', port: 26379 }]);
+      });
+
+      test('a sentinel URI without a port falls back to redis\'s own default', async () => {
+        const a = new RedisAdapter(jest.fn(), 1000, clusterFactory, sentinelFactory);
+        await a.connect('redis-sentinel://sentinel/mymaster');
+
+        expect(sentinelFactory.mock.calls[0][0].sentinelRootNodes)
+          .toEqual([{ host: 'sentinel', port: 26379 }]);
       });
 
       test('refuses a scheme the driver has no name for, rather than a DNS error about it', async () => {

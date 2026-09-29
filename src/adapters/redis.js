@@ -8,6 +8,9 @@ import { RedisSchemaAdapter } from '../core/schema.js';
  */
 const JSON_REPLY_COMMANDS = new Set(['GET', 'HGET', 'MGET', 'HMGET']);
 
+/** Redis's own default sentinel port, used when a `redis-sentinel://` URI names none. */
+const DEFAULT_SENTINEL_PORT = 26379;
+
 /**
  * Commands whose reply is a field/value mapping.
  *
@@ -226,12 +229,16 @@ export class RedisAdapter extends BaseAdapter {
         // The path is the master's name, which is how a sentinel set is
         // addressed: `redis-sentinel://:pass@sentinel:26379/mymaster`.
         name: decodeURIComponent(url.pathname.replace(/^\//, '')) || 'mymaster',
-        // Required, and the address the sentinels themselves are reached at. The
-        // option was missing for the whole life of this branch, so
-        // `redis-sentinel://` could not have connected even once: the driver had
-        // no node to ask about the topology, and threw while reading the
-        // undefined list.
-        sentinelRootNodes: [{ url: endpoint }],
+        // Required, and the address the sentinels themselves are reached at.
+        //
+        // `{host, port}`, not `{url}`: `RedisNode` in @redis/client's
+        // sentinel/types.d.ts is declared as `host: string; port: number`, and
+        // that is the element type of `sentinelRootNodes`. Passing the cluster
+        // shape `{url}` here is what a cluster wants and a sentinel does not,
+        // and against a real sentinel set it produced
+        // "ERR unknown command 'SENTINEL'" - the discovery command was reaching
+        // a node that was not a sentinel, because no root node had been found.
+        sentinelRootNodes: [{ host: url.hostname, port: Number(url.port || DEFAULT_SENTINEL_PORT) }],
         // Credentials and timeouts for the *master and replicas*, and separately
         // for the *sentinels*. Those are two different connections to two
         // different processes, and a sentinel set routinely authenticates them
