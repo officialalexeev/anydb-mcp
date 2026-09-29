@@ -84,3 +84,7 @@ build/
 # Lockfiles other than npm's, in case somebody tries one.
 yarn.lock
 pnpm-lock.yaml
+
+# scratch
+.astfp.cjs
+*.code.txt
