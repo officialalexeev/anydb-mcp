@@ -217,9 +217,14 @@ export class RedisAdapter extends BaseAdapter {
     const password = decodeURIComponent(url.password);
     const username = decodeURIComponent(url.username);
     const auth = password ? { username: username || undefined, password } : undefined;
-    const socket = { connectTimeout: this.connectTimeout };
     const endpoint = `redis://${url.hostname}${url.port ? `:${url.port}` : ''}`;
 
+    // Only the options that carry something. A probe with no code of ours in the
+    // path connected to both topologies with `name` + `sentinelRootNodes`, and
+    // with `rootNodes` + `useReplicas: false`, and nothing else. Passing a bare
+    // `socket` or a bare `defaults` on top - which is what this used to do
+    // unconditionally - took the sentinel set back to "ERR unknown command
+    // 'SENTINEL'". An option with no value in it is not free.
     this.cluster = true;
     this.client = sentinel
       ? factory({
@@ -228,31 +233,44 @@ export class RedisAdapter extends BaseAdapter {
         name: decodeURIComponent(url.pathname.replace(/^\//, '')) || 'mymaster',
         // Required, and the address the sentinels themselves are reached at.
         //
-        // `{url}`, not the `{host, port}` that `RedisNode` in
-        // @redis/client's sentinel/types.d.ts is declared as. The declaration is
-        // not what the client reads: a probe with no code of ours in the path
-        // connected and reported isReady=true with `{url}`, and answered "ERR
-        // unknown command 'SENTINEL'" with `{host, port}` - the discovery
-        // command reached a node that was not a sentinel, because no root node
-        // had been found to ask. Trusting the type over the client is how the
-        // wrong shape got in here in the first place.
+        // `{url}`, not the `{host, port}` that `RedisNode` in @redis/client's
+        // sentinel/types.d.ts is declared as. The declaration is not what the
+        // client reads: against a real sentinel set, `{url}` connected and
+        // reported isReady, while `{host, port}` answered "ERR unknown command
+        // 'SENTINEL'" - the discovery command reached a node that was not a
+        // sentinel, because no root node had been found to ask. Trusting the
+        // type over the client is how the wrong shape got in here at all.
         sentinelRootNodes: [{ url: endpoint }],
         // Credentials and timeouts for the *master and replicas*, and separately
-        // for the *sentinels*. Those are two different connections to two
-        // different processes, and a sentinel set routinely authenticates them
-        // differently. These were previously passed as `nodeClient` and
-        // `sentinel`, which are not fields this driver version reads at all, so
-        // the credentials reached nothing.
+        // for the *sentinels*: two connections to two different processes, which
+        // a sentinel set routinely authenticates differently. These were
+        // previously passed as `nodeClient` and `sentinel`, neither of which
+        // this driver version reads, so the credentials reached nothing.
         ...(auth
-          ? { nodeClientOptions: { ...auth, socket }, sentinelClientOptions: { ...auth, socket } }
-          : { nodeClientOptions: { socket }, sentinelClientOptions: { socket } }),
+          ? {
+            nodeClientOptions: { ...auth, socket: { connectTimeout: this.connectTimeout } },
+            sentinelClientOptions: { ...auth, socket: { connectTimeout: this.connectTimeout } },
+          }
+          : {}),
       })
       : factory({
         // `rootNodes` is how the topology is discovered and, per the driver's own
         // documentation, is not inherited by the connections to the nodes it
         // finds, which is why credentials go in `defaults` below.
         rootNodes: [{ url: endpoint }],
-        defaults: { ...(auth ? { username: auth.username, password: auth.password } : {}), socket },
+        // Only masters. A replica has a read-only replica of the data and
+        // answering from one would mean a `GET` could miss a write it had just
+        // made, and `db_query` has no notion of a read-only node.
+        useReplicas: false,
+        ...(auth
+          ? {
+            defaults: {
+              username: auth.username,
+              password: auth.password,
+              socket: { connectTimeout: this.connectTimeout },
+            },
+          }
+          : {}),
       });
 
     try {

@@ -212,6 +212,35 @@ describe('RedisAdapter', () => {
         }
       });
 
+      test('an unauthenticated topology is given no options that carry nothing', async () => {
+        // A bare `socket`, or a bare `defaults`, is not free. The probe proved
+        // that `name` + `sentinelRootNodes` connects, and `rootNodes` +
+        // `useReplicas: false` connects, and nothing else; adding an empty
+        // wrapper on top took the sentinel set back to "ERR unknown command
+        // 'SENTINEL'". Pinned so the wrappers only come back with something
+        // inside them.
+        const a = new RedisAdapter(jest.fn(), 1000, clusterFactory, sentinelFactory);
+        await a.connect('redis-sentinel://sentinel:26379/mymaster');
+
+        // The factories are shared across this block, so `calls[0]` is whichever
+        // test ran first. The last call is this one's.
+        const options = sentinelFactory.mock.calls.at(-1)[0];
+        expect(Object.keys(options).sort()).toEqual(['name', 'sentinelRootNodes']);
+        expect(options).not.toHaveProperty('nodeClientOptions');
+        expect(options).not.toHaveProperty('sentinelClientOptions');
+        expect(options).not.toHaveProperty('nodeClient');
+        expect(options).not.toHaveProperty('sentinel');
+      });
+
+      test('a cluster is pinned to masters, and is given no empty defaults', async () => {
+        const a = new RedisAdapter(jest.fn(), 1000, clusterFactory, sentinelFactory);
+        await a.connect('redis-cluster://node1:7000');
+
+        const options = clusterFactory.mock.calls.at(-1)[0];
+        expect(options.useReplicas).toBe(false);
+        expect(options).not.toHaveProperty('defaults');
+      });
+
       test('a sentinel set is given a node to ask about the topology', async () => {
         // `sentinelRootNodes` is required, and its element shape is `{url}`.
         //
