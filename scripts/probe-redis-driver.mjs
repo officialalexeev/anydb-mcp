@@ -51,9 +51,9 @@ if (CLUSTER) {
   const byHostPort = { host, port };
 
   await attempt('cluster rootNodes {url}', () => createCluster({ rootNodes: [byUrl] }),
-    (c) => `PING -> ${String(await c.sendCommand(['PING']).catch((e) => `sendCommand: ${e.message}`)).slice(0, 70)}`);
+    async (c) => `PING -> ${String(await c.sendCommand(['PING']).catch((e) => `sendCommand: ${e.message}`)).slice(0, 70)}`);
   await attempt('cluster rootNodes {host,port}', () => createCluster({ rootNodes: [byHostPort] }),
-    (c) => `PING -> ${String(await c.sendCommand(['PING']).catch((e) => `sendCommand: ${e.message}`)).slice(0, 70)}`);
+    async (c) => `PING -> ${String(await c.sendCommand(['PING']).catch((e) => `sendCommand: ${e.message}`)).slice(0, 70)}`);
   await attempt('cluster {url} + useReplicas:false', () => createCluster({ rootNodes: [byUrl], useReplicas: false }),
     (c) => `masters=${c.masters?.length}`);
   await attempt('cluster {host,port} + useReplicas:false', () => createCluster({ rootNodes: [byHostPort], useReplicas: false }),
