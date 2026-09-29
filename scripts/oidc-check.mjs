@@ -44,25 +44,35 @@ async function main() {
   notice('audience', JSON.stringify(claims.aud));
   notice('repository', String(claims.repository));
 
-  const exchanged = await fetch(`https://registry.npmjs.org/-/v1/oidc/token/exchange/package/${PACKAGE}`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: '{}',
-  });
+  // The /npm/ segment is part of the path. Without it npm answers 404
+  // ResourceNotFound, which reads exactly like "no trusted publisher" and sent
+  // the first version of this check chasing a configuration that may have been
+  // correct all along.
+  const exchanged = await fetch(
+    `https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${encodeURIComponent(PACKAGE)}`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: '{}',
+    },
+  );
   const body = (await exchanged.text()).slice(0, 500);
 
   notice('exchange HTTP', String(exchanged.status));
   notice('exchange body', body.replace(/\s+/g, ' '));
 
   if (exchanged.ok) {
-    notice('result', 'npm accepted the identity. If a release still fails, the mismatch is the Environment name field, which this job does not exercise.');
+    notice('result', 'npm accepted the identity. Trusted publishing is configured correctly; the next release will carry provenance.');
     return;
   }
 
   notice('result', 'npm rejected the identity. The Trusted Publisher entry on npmjs.com does not match this workflow.');
   error(`expected sub: repo:officialalexeev/anydb-mcp:environment:npm`);
+  error(`got sub   : ${claims.sub}`);
   error(`expected aud: ${AUDIENCE}`);
-  error('check, in this order at https://www.npmjs.com/settings/anydb-mcp/access/publishers:');
+  error('read what is actually configured at:');
+  error('  GET https://registry.npmjs.org/-/package/anydb-mcp/trust   (with an npm token)');
+  error('then check, in this order at https://www.npmjs.com/settings/anydb-mcp/access/publishers:');
   error('  1. Organization or user = officialalexeev');
   error('  2. Repository          = anydb-mcp');
   error('  3. Workflow filename   = release.yml   (the filename only, with the extension, no path)');

@@ -25,10 +25,11 @@ jobs:
     name: exchange an OIDC token for a publish token
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # No `environment:` here on purpose, so the subject is the ref form. A
-    # successful exchange proves the credentials, the package and the audience.
-    # It does not exercise the Environment name field -- the most likely
-    # mismatch -- and the output says so rather than claiming more than it knows.
+    # The same environment the release job uses, because the environment is part
+    # of the subject: without it GitHub issues ...:ref:refs/heads/main, npm sees
+    # an identity the Trusted Publisher entry was never registered for, and the
+    # check would report a mismatch that does not exist.
+    environment: npm
     steps:
     - uses: actions/checkout@v6
 
