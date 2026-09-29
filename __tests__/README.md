@@ -109,16 +109,21 @@ a green run against four databases.
 - a write behind **both** gates, then a read-back
 - cache reuse, proved by the cache size not moving across a second call
 - a refusal: read-only mode against a live server, and `DESTRUCTIVE` behind
-  `readOnly: false` alone
-- a statement the server refuses, asserting the **driver code survives** — `42P01`
-  on PostgreSQL, `SQLITE_ERROR` on SQLite — which is the only place the `cause`
+  `readOnly: false` alone — for the SQL backends. MongoDB is the exception and has
+  its own case: a data write needs `readOnly: false` and *nothing else*, because
+  `classifiesAsDestructive` covers only `drop`, `dropDatabase`, `create` and
+  `createIndex`, none of which `db_query` exposes
+- a statement the server refuses, asserting the **driver code survives** - `42P01`
+  on PostgreSQL, `SQLITE_ERROR` on SQLite - which is the only place the `cause`
   chain is tested end to end
 - `db_explain` returning a plan and not running the statement
 - MongoDB only, because it is the backend where a mock is least like the truth:
-  the five writes, `updateOne` changing one document and leaving the rest alone,
-  `deleteOne` removing exactly one, **an empty filter refused on `delete` and
-  accepted on `deleteOne`**, server-side JavaScript refused even with both gates
-  set, a bounded aggregation, and a MongoDB `explain` that returns planner output
+  the four write actions this file drives (`insert`, `updateOne`, `delete`,
+  `deleteOne`; `update` and `replace` are not exercised), `updateOne` changing one
+  document and leaving the rest alone, `deleteOne` removing exactly one, **an
+  empty filter refused on `delete` and accepted on `deleteOne`**, server-side
+  JavaScript refused even with both gates set, a bounded aggregation, and a
+  MongoDB `explain` that returns planner output
 - Redis only: a command that changes connection state refused, and `db_explain`
   refusing Redis in words rather than by accident
 - every backend: that the policy is on and is what stops the loopback address

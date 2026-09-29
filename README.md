@@ -106,12 +106,8 @@ A fully quit-and-restart is needed; Claude Desktop reads the file at launch.
 <details>
 <summary><strong>Gemini CLI</strong></summary>
 
-Either `~/.gemini/settings.json` (user) or `.gemini/settings.json` (project), or
-the command:
-
-```bash
-gemini mcp add anydb -- npx -y anydb-mcp
-```
+Either `~/.gemini/settings.json` (user scope) or `.gemini/settings.json` (project
+scope):
 
 ```json
 {
@@ -123,6 +119,13 @@ gemini mcp add anydb -- npx -y anydb-mcp
   }
 }
 ```
+
+Gemini CLI also has `gemini mcp add [options] <name> <commandOrUrl> [args...]`,
+whose `-s, --scope` flag defaults to **project**, not user. Its documented
+examples put `--` after the command to separate Gemini's own flags from the
+server's, and this project's `-y` is such a flag, so the exact spelling is worth
+confirming with `gemini mcp add --help` on the version you have rather than
+copying from here.
 
 </details>
 
@@ -207,15 +210,20 @@ On Windows, use `npx.cmd` if your client cannot launch `npx` through a shell.
 
 Every `tools/list` response is paid for on **every request, by every model, in
 every session**, before anything useful has happened. A model is not reading a
-manual; it is paying rent on the tool list. DBHub states the trade as 1.4k tokens
-for two tools against 19k for twenty-eight.
+manual; it is paying rent on the tool list. For a third party's own numbers on
+that trade, DBHub's README reports itself at 1.4k tokens for two tools against
+MCP Toolbox at 19.0k for twenty-eight - a comparison that project makes about
+itself, measured with its own script, and is reproduced here as an indication of
+scale rather than as an independent measurement. This server's own figure is
+measured from its own `TOOLS` and is in the table below.
 
 So this server exposes five tools, not five-and-a-helper-per-driver: **the
 database is inferred from the connection, not from the tool name.** Twenty-three
 tools would describe five databases five times over.
 
 The whole `tools/list` payload is **21,441 bytes** for all five tools, which is
-about 5,300 tokens:
+roughly 5,400 tokens at four bytes per token — an approximation, since the real
+ratio depends on the model, but the byte count below is measured, not estimated:
 
 | Tool | Bytes |
 |------|-------|
@@ -1591,11 +1599,12 @@ workaround that rewrote a URI to `mysql://` is no longer needed and can be remov
   driver with `await import()` inside `connect()`, so **no** driver is loaded by
   an import any more. What a library consumer who wants nothing but
   `inspectQuery` or `clampResult` pays for is this package's own source and the
-  MCP SDK: 4082 ms before the drivers were made lazy, 613 ms after, measured on
-  the same installed copy. `npm run verify:package` prints the number on every
-  run, as a hang guard rather than a performance target.
-  `scripts/verify-package.mjs` prints the measured cold import time on every run so
-  a change in either direction is visible in a log.
+  MCP SDK. That is a few hundred milliseconds, not seconds: the same check
+  measured 559-606 ms across four runs on the machine this was written on, and
+  the figure is machine-dependent enough that a single number would be false on
+  your hardware. `npm run verify:package` prints the measured cold import time on
+  every run, as a hang guard against an import that never returns rather than as
+  a performance target, and the run log is where to read your own.
 
 ---
 
@@ -1628,15 +1637,17 @@ which is what makes the request handlers reachable from a test in-process instea
 of only through a child process. `npx anydb-mcp` is unchanged.
 
 **Side-effect-free is not the same as free, and the import is not instant.** All
-five drivers — `pg`, `mysql2`, `mongodb`, `redis` and `sqlite3` — are resolved
+five drivers - `pg`, `mysql2`, `mongodb`, `redis` and `sqlite3` - are resolved
 with `await import()` inside their own adapter's `connect()`, so importing the
 barrel parses none of them. What is left is this package's own source and the
-MCP SDK: 4082 ms before the drivers were made lazy, 613 ms after, on the same
-installed copy. Nothing connects and nothing is registered — it is a load, not a
-side effect — and a caller who only wants `inspectQuery` or `clampResult` pays
-for the rest of the package. `npm run verify:package` prints the measured cold
-import time on every run (as a hang guard, not as a performance target); a
-number climbing back towards the old 4 s means a module-scope `import` of a
+MCP SDK, which is a few hundred milliseconds rather than the several seconds it
+cost when the drivers were still imported at module scope. Nothing connects and
+nothing is registered - it is a load, not a side effect - and a caller who only
+wants `inspectQuery` or `clampResult` pays for the rest of the package.
+`npm run verify:package` prints the measured cold import time on every run, as a
+hang guard against an import that never returns rather than as a performance
+target: the absolute number is machine-dependent, so the number to watch is your
+own baseline, and a climb towards seconds means a module-scope `import` of a
 driver has returned somewhere.
 
 ---
