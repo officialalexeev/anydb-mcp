@@ -102,6 +102,14 @@ jobs:
         # longer matches it, and a tarball built from neither. The verify job
         # above caches freely because a stale tree there costs a red test rather
         # than a published release.
+        #
+        # Which is why the install below is a plain `npm ci` and not a cache
+        # restore. It is not optional: `npm publish` runs `prepublishOnly`, which
+        # is `npm test && npm run verify:package`, and both need the tree. The
+        # first attempt at this published nothing and failed with
+        # "command sh -c npm test && npm run verify:package" -- jest was simply
+        # not on disk.
+    - run: npm ci
 
     - name: Refuse to publish a version that already exists
       # The cheapest guard against the failure this workflow can cause. A re-run
