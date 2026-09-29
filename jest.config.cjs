@@ -47,4 +47,11 @@ module.exports = {
   coverageReporters: ['text', 'text-summary', 'lcov', 'json-summary'],
   // Timers are asserted on with real durations, so give them room.
   testTimeout: 20000,
+  /**
+   * `default` first, so the readable report is unchanged. The second turns each
+   * failure into a GitHub annotation, because a red CI otherwise reports only
+   * "Process completed with exit code 1" and the test name lives in a log that
+   * is behind a sign-in. It is a no-op outside Actions.
+   */
+  reporters: ['default', '<rootDir>/scripts/jest-github-reporter.cjs'],
 };

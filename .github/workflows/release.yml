@@ -54,12 +54,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         # The tag's commit, not the default branch: `v3.0.0` must publish the tree
         # that `v3.0.0` points at.
         ref: ${{ github.ref }}
-    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version: 22.x
         cache: 'npm'
@@ -81,10 +81,10 @@ jobs:
       id-token: write
 
     steps:
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         ref: ${{ github.ref }}
-    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version: 22.x
         registry-url: https://registry.npmjs.org
@@ -135,7 +135,7 @@ jobs:
     # The tarball is not fetched by hand: `verify-package.mjs --from-registry`
     # installs the *published* artifact into a temp directory and drives it there,
     # so this job tests what npm actually serves rather than a local build of it.
-    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version: 22.x
 
@@ -144,7 +144,7 @@ jobs:
     # repository's `package.json` and `src/index.js` to assert the file list and
     # the shebang, and a sparse checkout would make those reads fail in a way that
     # looks like a packaging defect.
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         ref: ${{ github.ref }}
 
