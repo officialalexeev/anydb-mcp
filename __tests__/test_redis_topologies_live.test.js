@@ -60,13 +60,25 @@ for (const [label, uri, kind] of [
 
     beforeAll(async () => {
       registry = new AdapterRegistry({ env: {} });
-      // PING is what forces the adapter to be constructed and connected, so it
-      // is the cheapest way to make the topology do its work.
-      await registry.run(uri, 'PING', CALL);
+      // A *keyed* command, deliberately. It is what forces the adapter to be
+      // constructed and connected, and unlike PING it has a slot to be routed
+      // to - a cluster client computes the slot from the key, so a keyless
+      // command has nowhere to go and fails inside the driver. That limitation
+      // is asserted on its own below rather than being the thing that quietly
+      // breaks setup.
+      await registry.run(uri, 'SET anydb:topology:boot ping', { readOnly: false, ...CALL });
     }, HOOK_TIMEOUT);
 
     afterAll(async () => {
-      if (registry) await registry.close().catch(() => {});
+      if (!registry) return;
+      // Bounded, because a client that will not close holds the event loop open
+      // and the job would sit until its own timeout with nothing to show. The
+      // close is best-effort: a test run must report what it found, not fail in
+      // teardown.
+      await Promise.race([
+        registry.close().catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, 10000)),
+      ]);
     }, HOOK_TIMEOUT);
 
     test('connected through the topology, and says so', () => {
@@ -95,6 +107,21 @@ for (const [label, uri, kind] of [
       const report = reportOf(await registry.describe(uri, CALL));
       expect(report.database).toBe('redis');
       expect(report).toHaveProperty('keyspace');
+    });
+
+    test('db_schema on a cluster says it read one node, not the whole cluster', async () => {
+      // `scope` is present only on a cluster, and it is the difference between
+      // "this server has three keys" and "one master has three keys and the
+      // other two were never asked". A caller who cannot tell those apart will
+      // read a cluster total as a wrong answer.
+      const report = reportOf(await registry.describe(uri, CALL));
+      if (kind === 'cluster') {
+        expect(report.scope).toBe('one node of a Redis cluster, not the whole cluster');
+      } else {
+        // A sentinel set resolves to one master too, but it is a single node by
+        // construction, so the caveat would be noise.
+        expect(report.scope).toBeUndefined();
+      }
     });
 
     test('a refused command comes back as a database error, not a crash', async () => {

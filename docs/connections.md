@@ -375,16 +375,31 @@ over the list rather than another edit. `mariadb://` itself was worse: it is a
 work, and it did not route either. `mongodb+srv://` — the connection string almost
 everybody pastes out of Atlas — was rejected outright.
 
-**Redis Cluster and Sentinel are now reachable.** `redis-cluster://` builds a
-`createCluster` client with `rootNodes`, and `redis-sentinel://` builds a
-`createSentinel` client with the master's name taken from the path
-(`redis-sentinel://:pass@sentinel:26379/mymaster`). Both existed in the adapter
-long before the policy allowlist did, and without a policy entry
+**Redis Cluster and Sentinel are reachable, with one limitation on a cluster.**
+`redis-cluster://` builds a `createCluster` client with `rootNodes`, and
+`redis-sentinel://` builds a `createSentinel` client with the master's name taken
+from the path (`redis-sentinel://:pass@sentinel:26379/mymaster`). Both existed in
+the adapter long before the policy allowlist did, and without a policy entry
 `checkConnectionPolicy` refused the connection before the adapter was ever
-constructed — so the code had no caller. Cluster and Sentinel are ordinary
+constructed - so the code had no caller. Cluster and Sentinel are ordinary
 production topologies, so the schemes are allowed and routed rather than the code
-deleted. **Neither is exercised against a live server**; see
+deleted. Both are exercised against real topologies on every push; see
 [__tests__/README.md](../__tests__/README.md).
+
+**A cluster client routes by slot, and a command with no key has no slot.** That
+is the driver's design, not a limitation worked around here, and it has two
+consequences on `redis-cluster://` only:
+
+- `db_schema` and `db_health` read node-scoped commands (`INFO`, `SCAN`), so they
+  are issued against one master through the driver's own `nodeClient()`. The
+  `db_schema` answer carries `scope: "one node of a Redis cluster, not the whole
+  cluster"` so a caller comparing it against a cluster total does not read missing
+  keys as a fault. A sentinel set resolves to a single master by construction and
+  is not annotated.
+- `db_query` works for commands that take a key, which is the normal case. A
+  keyless command has nowhere to be routed and is refused by the driver rather
+  than answered; there is no table of which commands those are, because the
+  driver is the one that knows, and guessing would be worse than its answer.
 
 **One caveat worth knowing before you rely on the SQLAlchemy spellings.**
 `src/adapters/mysql.js` rewrites exactly four `mysql+<dialect>` forms to `mysql://` —

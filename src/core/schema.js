@@ -1607,6 +1607,9 @@ export class RedisSchemaAdapter extends SchemaAdapter {
   constructor(connectTimeout = 5000, queryTimeout = 30000) {
     super(connectTimeout, queryTimeout);
     this.client = null;
+    // Set by the Redis adapter when the client behind this report is a cluster,
+    // so the report can say that it read one node rather than the whole cluster.
+    this.clustered = false;
     this.databaseName = 'Redis';
   }
 
@@ -1664,6 +1667,14 @@ export class RedisSchemaAdapter extends SchemaAdapter {
       // same fact as a server with no keys.
       ...(unavailable.length ? { unavailable } : {}),
     };
+
+    // Said in the answer, because it is true and not obvious. On a cluster the
+    // node-scoped commands this report is built from cannot be routed to a slot,
+    // so it reads one master. A caller comparing `keyspace` against a cluster
+    // total would otherwise conclude keys are missing.
+    if (this.clustered) {
+      out.scope = 'one node of a Redis cluster, not the whole cluster';
+    }
 
     if (key !== null) out.key = await this.describeKey(key, positiveInt(options.maxRows, 5));
 

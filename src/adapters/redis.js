@@ -354,9 +354,46 @@ export class RedisAdapter extends BaseAdapter {
     );
   }
 
-  describe(options = {}) {
+  /**
+   * A client for operations that are not addressed to a key.
+   *
+   * A cluster client routes every command by slot, and the slot is computed from
+   * the key. `INFO`, `SCAN` and `PING` have no key, so there is no slot to route
+   * them to: against a real three-master cluster every one of them failed inside
+   * the driver. `masters[0].nodeClient()` is the driver's own answer to that — a
+   * normal single-node client bound to one master, which answers anything a
+   * single node can.
+   *
+   * The cost is a real one and is not hidden: what comes back is *one node's*
+   * view, not the cluster's. `db_schema` on a cluster therefore describes one
+   * master, and says so in its own output rather than implying it has seen the
+   * whole cluster. Summing across masters is not done here because it is a
+   * different question with a different answer, and guessing at it would be worse
+   * than being explicit.
+   *
+   * Outside a cluster this is the client itself, so nothing else changes.
+   */
+  async nodeClient() {
+    if (!this.cluster) return this.client;
+    this.nodeClientPromise ??= (async () => {
+      const master = this.client?.masters?.[0];
+      if (!master) {
+        throw new Error(
+          'The Redis cluster reported no masters, so there is no node to read schema or health from. '
+          + 'Check that the cluster is formed: CLUSTER INFO on any node should report cluster_state:ok.'
+        );
+      }
+      return master.nodeClient();
+    })();
+    return this.nodeClientPromise;
+  }
+
+  async describe(options = {}) {
     const schema = new RedisSchemaAdapter(this.connectTimeout, this.resolveQueryTimeout(options));
-    schema.client = this.client;
+    // The node client, not `this.client`: a cluster client cannot place INFO or
+    // SCAN, so `db_schema` on a cluster answered nothing until this changed.
+    schema.client = await this.nodeClient();
+    schema.clustered = this.cluster;
     schema.describeError = (err) => this.describeError(err, schema.queryTimeout);
     return schema.describe(options);
   }
