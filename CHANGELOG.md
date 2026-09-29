@@ -9,6 +9,33 @@ Release links for every version are at the bottom of this file.
 
 ## [Unreleased]
 
+## [3.0.3] - 2026-09-29
+
+> No action needed. This release exists to prove the release pipeline end to end:
+> everything in it was already fixed in 3.0.2, and the only functional change is
+> that the live database tests now run and pass.
+
+### Fixed
+
+- **MongoDB could not be reached from any test or tool run that loads the driver
+  through a bundler or a test runner.** `mongodb@7.6.0` resolves Node's `os`
+  module with a dynamic `import()`, which rejects outside a standard ESM context.
+  The driver swallows that rejection and falls back to an empty metadata
+  document, so the server is handed `client: {}` and refuses the connection with
+  *"Missing required sub-document 'driver'"* — naming a field the caller never
+  touched. The adapter now passes the module itself. Upstream: NODE-7832, still
+  unfixed in `mongodb@7.7.0`.
+
+### Changed
+
+- The live database suite has now actually run. It had never executed before, and
+  seven of its assertions were wrong rather than the code they checked: a
+  `postgresql` vs `postgres` spelling, a `documents` field read under two other
+  names, a Redis `keyspace` treated as a list when it is a map of counts, a Redis
+  `error.code` that `node-redis@6` does not put on server replies, a MongoDB
+  `insert` asserted to need `allowDestructive` after that rule was deliberately
+  reverted, and a `NamespaceNotFound` that no MongoDB action can raise.
+
 ## [3.0.2] - 2026-09-29
 
 > **Read this if you arrived from 3.0.1.** `anydb-mcp@3.0.1` on npm cannot start
@@ -1059,7 +1086,8 @@ produced one.
 
 ---
 
-[Unreleased]: https://github.com/officialalexeev/anydb-mcp/compare/v3.0.2...HEAD
+[Unreleased]: https://github.com/officialalexeev/anydb-mcp/compare/v3.0.3...HEAD
+[3.0.3]: https://github.com/officialalexeev/anydb-mcp/compare/v3.0.2...v3.0.3
 [3.0.2]: https://github.com/officialalexeev/anydb-mcp/compare/v3.0.1...v3.0.2
 [3.0.1]: https://github.com/officialalexeev/anydb-mcp/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/officialalexeev/anydb-mcp/compare/v2.0.4...v3.0.0
