@@ -324,6 +324,18 @@ jobs:
     - name: Start the cluster and the sentinel set
       run: bash scripts/ci-redis-topologies.sh up redis-topologies.env
 
+    # Before the adapter, and with none of its code in the path: both topologies
+    # are currently failing with a TypeError from inside node-redis on the first
+    # command, and the useful thing to know is which of the two layers is at
+    # fault. This answers that on its own and prints the answer either way, so
+    # the job stops guessing.
+    - name: Probe the driver directly
+      run: |
+        set -a
+        . ./redis-topologies.env
+        set +a
+        node scripts/probe-redis-driver.mjs
+
     - name: Drive them through the adapter
       # `pipefail` so a failing test fails the step, and the log is teed for the
       # step below to turn into annotations.
