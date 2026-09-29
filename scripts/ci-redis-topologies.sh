@@ -152,11 +152,16 @@ start_sentinel_set() {
   # and renames it over the original, so it needs write permission on the
   # *directory*, not just on the file. A bind mount into `/usr/local/etc/redis`
   # is a directory the image's entrypoint never chowns, so the rewrite failed,
-  # redis-server exited, and `--rm` removed the container - leaving only an exit
-  # code with nothing in it. Writing into `/data` and exec'ing from there needs no
+  # redis-server exited, and the container was gone - leaving only an exit code
+  # with nothing in it. Writing into `/data` and exec'ing from there needs no
   # mount, no host file and no permission arithmetic.
+  # `redis-sentinel`, not `redis-server`. They are different binaries that read
+  # the same syntax, and a config carrying `sentinel monitor` makes
+  # `redis-server` refuse to start rather than switch modes: "sentinel directive
+  # while not in sentinel mode", a FATAL CONFIG FILE ERROR. Only the
+  # `redis-sentinel` binary *is* sentinel mode, so that is the one to exec.
   docker run -d --name anydb-sentinel --network host \
-    redis:7-alpine sh -c "printf 'sentinel monitor $MASTER_NAME 127.0.0.1 $MASTER_PORT\nsentinel down-after-milliseconds $MASTER_NAME 5000\nsentinel failover-timeout $MASTER_NAME 10000\n' > /data/sentinel.conf && exec redis-server /data/sentinel.conf --port $SENTINEL_PORT" >/dev/null \
+    redis:7-alpine sh -c "printf 'sentinel monitor $MASTER_NAME 127.0.0.1 $MASTER_PORT\nsentinel down-after-milliseconds $MASTER_NAME 5000\nsentinel failover-timeout $MASTER_NAME 10000\n' > /data/sentinel.conf && exec redis-sentinel /data/sentinel.conf --port $SENTINEL_PORT" >/dev/null \
     || fail 'the sentinel container refused to start'
   wait_for anydb-sentinel "$SENTINEL_PORT" || fail 'the sentinel never answered PING'
   local i=0
