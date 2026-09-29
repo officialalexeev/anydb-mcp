@@ -13,6 +13,8 @@ name: check trusted publishing
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ main ]
 
 permissions:
   contents: read
