@@ -12,19 +12,34 @@ const AUDIENCE = 'npm:registry.npmjs.org';
 const notice = (title, message) => console.log(`::notice title=${title}::${message}`);
 const error = (line) => console.log(`::error::${line}`);
 
+// GitHub answers with {count, value}; the JWT is in `value`. Passing the whole
+// response to claims() threw a TypeError on .split and the job died before it
+// printed anything, so every failure is reported as an annotation now.
 async function mint() {
   const url = `${process.env.ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${AUDIENCE}`;
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}` },
   });
   if (!res.ok) throw new Error(`minting the OIDC token: HTTP ${res.status} ${await res.text()}`);
-  return res.json();
+  const body = await res.json();
+  const jwt = body.value ?? body.id_token ?? body;
+  if (typeof jwt !== 'string' || jwt.split('.').length !== 3) {
+    throw new Error(`unexpected token response: ${JSON.stringify(body).slice(0, 200)}`);
+  }
+  return jwt;
 }
 
 const claims = (token) => JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
 
-const token = await mint();
-const { sub, aud, repository } = claims(token.id_token ?? token);
+let token;
+try {
+  token = await mint();
+} catch (e) {
+  notice('could not mint', e.message);
+  process.exit(0);
+}
+
+const { sub, aud, repository } = claims(token);
 
 notice('subject', sub);
 notice('audience', JSON.stringify(aud));
@@ -32,7 +47,7 @@ notice('repository', repository);
 
 const res = await fetch(`https://registry.npmjs.org/-/v1/oidc/token/exchange/package/${PACKAGE}`, {
   method: 'POST',
-  headers: { Authorization: `Bearer ${token.id_token ?? token}`, 'Content-Type': 'application/json' },
+  headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
   body: '{}',
 });
 const body = (await res.text()).slice(0, 500);
