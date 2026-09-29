@@ -76,6 +76,16 @@ wait_for() {
     if docker exec "$name" redis-cli -p "$port" ping 2>/dev/null | grep -q PONG; then
       return 0
     fi
+    # A container that has exited will never answer, and waiting out the full
+    # budget tells you nothing. The reason it exited is in its log, so say so
+    # and stop.
+    if [ "$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null || echo false)" != "true" ]; then
+      echo "::error::$name exited instead of answering PING; its own log follows"
+      docker logs --tail 20 "$name" 2>&1 | while IFS= read -r line; do
+        echo "::error::$name| $line"
+      done
+      return 1
+    fi
     i=$((i + 1))
     sleep 1
   done
@@ -87,7 +97,7 @@ start_cluster() {
   for port in "${CLUSTER_PORTS[@]}"; do
     local name="anydb-cluster-$port"
     NAMES+=("$name")
-    docker run -d --rm --name "$name" --network host \
+    docker run -d --name "$name" --network host \
       redis:7-alpine redis-server \
       --port "$port" \
       --cluster-enabled yes \
@@ -124,11 +134,11 @@ start_cluster() {
 start_sentinel_set() {
   NAMES+=(anydb-sentinel-master anydb-sentinel-replica anydb-sentinel)
 
-  docker run -d --rm --name anydb-sentinel-master --network host \
+  docker run -d --name anydb-sentinel-master --network host \
     redis:7-alpine redis-server --port "$MASTER_PORT" --appendonly no --save '' >/dev/null
   wait_for anydb-sentinel-master "$MASTER_PORT" || fail 'the master never answered PING'
 
-  docker run -d --rm --name anydb-sentinel-replica --network host \
+  docker run -d --name anydb-sentinel-replica --network host \
     redis:7-alpine redis-server --port "$REPLICA_PORT" --replicaof 127.0.0.1 "$MASTER_PORT" \
     --appendonly no --save '' >/dev/null
   wait_for anydb-sentinel-replica "$REPLICA_PORT" || fail 'the replica never answered PING'
@@ -145,7 +155,7 @@ start_sentinel_set() {
   # redis-server exited, and `--rm` removed the container - leaving only an exit
   # code with nothing in it. Writing into `/data` and exec'ing from there needs no
   # mount, no host file and no permission arithmetic.
-  docker run -d --rm --name anydb-sentinel --network host \
+  docker run -d --name anydb-sentinel --network host \
     redis:7-alpine sh -c "printf 'sentinel monitor $MASTER_NAME 127.0.0.1 $MASTER_PORT\nsentinel down-after-milliseconds $MASTER_NAME 5000\nsentinel failover-timeout $MASTER_NAME 10000\n' > /data/sentinel.conf && exec redis-server /data/sentinel.conf --port $SENTINEL_PORT" >/dev/null \
     || fail 'the sentinel container refused to start'
   wait_for anydb-sentinel "$SENTINEL_PORT" || fail 'the sentinel never answered PING'
