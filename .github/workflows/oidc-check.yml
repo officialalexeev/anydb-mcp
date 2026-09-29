@@ -30,6 +30,8 @@ jobs:
     # It does not exercise the Environment name field -- the most likely
     # mismatch -- and the output says so rather than claiming more than it knows.
     steps:
+    - uses: actions/checkout@v6
+
     - name: Ask npm whether it accepts this identity
       # Base64url, so the payload is decoded in Node. Doing it in the shell with
       # `base64 -d` silently produced nothing: the alphabet is `-_` and there is
