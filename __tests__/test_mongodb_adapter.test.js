@@ -1,3 +1,4 @@
+import * as nodeOs from 'node:os';
 import { MongoAdapter, DEFAULT_LIMIT, MAX_LIMIT } from '../src/adapters/mongodb.js';
 
 // Behaviour of individual actions is covered in test_mongodb_actions.test.js.
@@ -138,6 +139,12 @@ describe('MongoAdapter connection', () => {
       // about how long a statement may then run. This is the per-operation
       // bound, and it is the one that was missing.
       expect(mockClientConstructor).toHaveBeenCalledWith('mongodb://localhost:27017/mydb', {
+        // The driver resolves `os` with `await import('os')`, which rejects under
+        // Jest and leaves the handshake metadata empty; the server then refuses
+        // the connection with a complaint about a missing `driver` field that
+        // names nothing the caller did. The adapter hands the module over
+        // instead, and this assertion is what keeps that from being undone.
+        runtimeAdapters: { os: nodeOs },
         serverSelectionTimeoutMS: 5000,
         connectTimeoutMS: 5000,
         socketTimeoutMS: 30000,

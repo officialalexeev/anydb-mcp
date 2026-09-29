@@ -167,7 +167,10 @@ describeIfLive('postgres', () => {
     const report = reportOf(await registry.describe(uri, { timeout: 30000 }));
     const table = report.tables.find((entry) => entry.name === TABLE);
 
-    expect(report.database).toBe('postgres');
+    // The adapter's contract is `postgresql`, not the `postgres://` URI scheme,
+    // and two unit tests already pin that spelling. This live test was the only
+    // place asking for the scheme, and had never been run before CI.
+    expect(report.database).toBe('postgresql');
     expect(table).toBeDefined();
     expect(table.columns.map((column) => column.name).sort()).toEqual(['email', 'id', 'seen']);
     expect(table.columns.find((column) => column.name === 'email').type).toMatch(/text/);
@@ -309,7 +312,13 @@ describeIfLive('mysql', () => {
   }, HOOK_TIMEOUT);
 
   test('connects and reports the server it reached', async () => {
-    const rows = rowsOf(await registry.run(uri, 'SELECT VERSION() AS v', { timeout: 30000 }));
+    // `VERSION()` returns a bare `8.4.x` on Oracle MySQL; the `-MariaDB-` form is
+    // MariaDB's. Asking either server for `VERSION()` and then grepping the answer
+    // for a product name therefore only ever passed against MariaDB, and CI runs
+    // `mysql:8.4`, which is Oracle. `@@version_comment` is where MySQL actually
+    // names itself ("MySQL Community Server - GPL"), so the assertion below means
+    // the same thing on both servers.
+    const rows = rowsOf(await registry.run(uri, 'SELECT @@version_comment AS v', { timeout: 30000 }));
     expect(String(rows[0]?.v ?? '')).toMatch(/MariaDB|MySQL/i);
   });
 

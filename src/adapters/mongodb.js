@@ -1,3 +1,4 @@
+import * as nodeOs from 'node:os';
 import { BaseAdapter, positiveInt, logCloseFailure } from '../core/base-adapter.js';
 import { findWriteStage, TOO_DEEP } from '../core/safety.js';
 import { MongoSchemaAdapter } from '../core/schema.js';
@@ -141,6 +142,18 @@ export class MongoAdapter extends BaseAdapter {
     // no timeout of its own, so the connect budget covers it and the registry's
     // outer guard is what bounds a resolver that never answers.
     this.client = new ClientClass(uri, {
+      // The driver's own `os` loader is `await import('os')` as of 7.6.0, and a
+      // dynamic import that rejects leaves the handshake metadata empty rather
+      // than failing: `mongo_client.js` squashes the rejection and falls back to
+      // `{}`, so the server is handed `client: {}` and answers "Missing required
+      // sub-document 'driver'". Under Jest, which has no `--experimental-vm-
+      // modules`, that import always rejects, which is why every live MongoDB
+      // check failed against a healthy `mongo:7` while nothing was wrong with
+      // the server, the URI or the adapter. Tracked upstream as NODE-7832.
+      //
+      // Passing the module ourselves is the escape hatch the driver exposes for
+      // exactly this, and it costs one import that was going to happen anyway.
+      runtimeAdapters: { os: nodeOs },
       serverSelectionTimeoutMS: this.connectTimeout,
       connectTimeoutMS: this.connectTimeout,
       // A bound on an *individual* operation, which `serverSelectionTimeoutMS` is
