@@ -133,31 +133,26 @@ jobs:
       # the run -- and printing it turns "the configuration is wrong somewhere"
       # into "the environment name in the config is `X` and the subject is `Y`".
       #
+      # Emitted as annotations rather than stdout, because stdout is in a log
+      # behind a sign-in and that is the whole reason this step exists.
+      #
       # Only the decoded header and payload are read. The signature is not
       # checked and the token itself is never echoed.
       run: |
         set -euo pipefail
         url="${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org"
-        token="$(curl -sSf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "$url" \
+        curl -sSf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "$url" \
           | node -e "
             let s=''; process.stdin.on('data',d=>s+=d).on('end',()=>{
               const p=JSON.parse(Buffer.from(s.trim().split('.')[1],'base64url'));
-              console.log('  sub      : ' + p.sub);
-              console.log('  aud      : ' + JSON.stringify(p.aud));
-              console.log('  repository: ' + p.repository);
-              console.log('  environment_name: ' + JSON.stringify(p.environment_name ?? null));
+              const line=(k,v)=>console.log('::notice title=OIDC '+k+'::'+String(v));
+              line('sub', p.sub);
+              line('aud', JSON.stringify(p.aud));
+              line('repository', p.repository);
+              line('environment_name', JSON.stringify(p.environment_name ?? null));
+              line('what npm expects', 'repo:officialalexeev/anydb-mcp:environment:npm');
             });
-          ")"
-        echo "$token"
-        {
-          echo "npm matches this sub against the Trusted Publisher entry."
-          echo "  Owner / user    : officialalexeev"
-          echo "  Repository      : anydb-mcp"
-          echo "  Workflow        : release.yml"
-          echo "  Expected sub    : repo:officialalexeev/anydb-mcp:environment:npm"
-          echo "  If environment_name above is null the entry's Environment name"
-          echo "  field must be emptied, and the sub becomes ...:ref:refs/tags/... instead."
-        } >> "$GITHUB_STEP_SUMMARY"
+          "
 
     - name: Publish with provenance
       # No NODE_AUTH_TOKEN, and that is deliberate. With trusted publishing
@@ -182,13 +177,16 @@ jobs:
         set -o pipefail
         npm publish --provenance --access public 2>&1 | tee publish.log
     - name: Surface what npm said
+      # `npm error` only. The tarball listing is dozens of `npm notice` lines
+      # ahead of the failure, and including them pushed the reason off the end of
+      # the annotation list -- which is the reason the first two runs reported
+      # nothing useful.
       if: failure()
       run: |
         {
-          echo "::error title=npm publish failed::"
-          grep -E '^npm (error|notice|warn)' publish.log | head -30 | \
-            sed 's/^/::error::/' || true
-        } || true
+          echo "::error title=npm publish failed::see the npm error lines below"
+          grep -E '^npm error' publish.log | head -30 | sed 's/^/::error::/' || true
+        }
 
   verify-published:
     name: verify what is on the registry
