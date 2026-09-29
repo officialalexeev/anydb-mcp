@@ -118,6 +118,39 @@ jobs:
           exit 1
         fi
 
+    - name: Report the OIDC identity npm will match against
+      # npm matches the token's `sub` claim against the trusted publisher entry on
+      # npmjs.com, and the mismatch is reported as ENEEDAUTH with no detail. The
+      # claim is not a secret -- it is the workflow's identity, already public in
+      # the run -- and printing it turns "the configuration is wrong somewhere"
+      # into "the environment name in the config is `X` and the subject is `Y`".
+      #
+      # Only the decoded header and payload are read. The signature is not
+      # checked and the token itself is never echoed.
+      run: |
+        set -euo pipefail
+        url="${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org"
+        token="$(curl -sSf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "$url" \
+          | node -e "
+            let s=''; process.stdin.on('data',d=>s+=d).on('end',()=>{
+              const p=JSON.parse(Buffer.from(s.trim().split('.')[1],'base64url'));
+              console.log('  sub      : ' + p.sub);
+              console.log('  aud      : ' + JSON.stringify(p.aud));
+              console.log('  repository: ' + p.repository);
+              console.log('  environment_name: ' + JSON.stringify(p.environment_name ?? null));
+            });
+          ")"
+        echo "$token"
+        {
+          echo "npm matches this sub against the Trusted Publisher entry."
+          echo "  Owner / user    : officialalexeev"
+          echo "  Repository      : anydb-mcp"
+          echo "  Workflow        : release.yml"
+          echo "  Expected sub    : repo:officialalexeev/anydb-mcp:environment:npm"
+          echo "  If environment_name above is null the entry's Environment name"
+          echo "  field must be emptied, and the sub becomes ...:ref:refs/tags/... instead."
+        } >> "$GITHUB_STEP_SUMMARY"
+
     - name: Publish with provenance
       # No NODE_AUTH_TOKEN, and that is deliberate. With trusted publishing
       # configured, the CLI detects the OIDC environment and exchanges its
@@ -132,7 +165,22 @@ jobs:
       # `--provenance` is redundant with trusted publishing -- npm attaches an
       # attestation automatically -- but stating it is harmless and keeps the
       # intent visible if the publish path ever changes.
-      run: npm publish --provenance --access public
+      #
+      # Teed, and the npm errors turned into annotations, because a bare "exit
+      # code 1" on this step is the single most expensive failure to diagnose in
+      # the whole workflow: the cause is always in the output and the output is
+      # behind a sign-in.
+      run: |
+        set -o pipefail
+        npm publish --provenance --access public 2>&1 | tee publish.log
+    - name: Surface what npm said
+      if: failure()
+      run: |
+        {
+          echo "::error title=npm publish failed::"
+          grep -E '^npm (error|notice|warn)' publish.log | head -30 | \
+            sed 's/^/::error::/' || true
+        } || true
 
   verify-published:
     name: verify what is on the registry
