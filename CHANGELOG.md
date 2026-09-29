@@ -13,6 +13,23 @@ Release links for every version are at the bottom of this file.
 
 ### Fixed
 
+- **The installed server could not start on Linux or macOS.** npm writes a
+  `.cmd` shim on Windows and a symlink everywhere else, so on the other two
+  `process.argv[1]` is `node_modules/.bin/anydb-mcp` and never matched the
+  `src/index.js` pattern the version lookup tests. The server exited before
+  answering `initialize`, which is why `verify:package` failed on exactly the two
+  checks that need a version, on exactly the two operating systems that get a
+  symlink, and passed on the one that does not. `ownPath()` now resolves the
+  entry through `realpath` before giving up.
+- **A MongoDB data write needed two flags where a SQL write needs one.**
+  `insert`, `update`, `updateOne`, `replace`, `delete` and `deleteOne` were in
+  the destructive set, built from the write-action list rather than from the
+  names that change a collection's structure. So the same row could be added to
+  PostgreSQL with `readOnly: false` and to MongoDB with `readOnly: false` plus
+  `allowDestructive: true`, with the reason "writes to a collection" for a write
+  the previous gate had already permitted. The set is now `drop`,
+  `dropDatabase`, `create` and `createIndex` -- the MongoDB equivalents of DDL --
+  and the reason says "changes a collection's structure or existence".
 - **A `close()` on an already-closed connection was logged at `error`, with a
   stack trace.** The cache evicts an entry and disposes it, and a caller holding
   the same adapter can close it again, so "pool is closed" and "client is closed"
@@ -25,6 +42,35 @@ Release links for every version are at the bottom of this file.
 - **An ignored URI parameter was logged at `error`.** `?charset=utf8mb4` that
   this server does not honour is worth a warning, not a fault -- the connection
   works. MySQL and SQLite now report it at `warn`.
+- **Two tests asserted Windows path handling on every operating system.** Both
+  built a drive-letter fixture out of `os.tmpdir()`, which is `C:\Users\...` on
+  Windows and `/tmp/...` elsewhere -- and `path.win32` turns the second into a
+  path with no drive, so `resolve()` falls back to the working directory and each
+  assertion compared unrelated strings. The product was right in both cases:
+  `checkSqlitePathPolicy` resolves against the real filesystem so a symlink cannot
+  leave the tree, and `toUri` resolves against the directory holding `db.json`.
+  Both now run on Windows hosts, where the rule they cover needs one to exist.
+- **`scripts/live-adapters.mjs` still expected the 2.x result shape.** `describe`
+  returns an envelope in 3.0, so the report is under `rows`; the check looked for
+  `database` at the top level and failed on all four backends.
+- **`release.yml` defeated the trusted publishing it was written for.** The
+  publish step passed `NODE_AUTH_TOKEN` from `secrets.NPM_TOKEN`, on the comment
+  that npm requires it for `--provenance`. npm's documentation says the opposite:
+  the CLI detects the OIDC environment itself, and a real token takes precedence
+  over that. An unset secret passes an empty string, so the run fell back to
+  nothing on the runner and failed with `ENEEDAUTH`. The package-manager cache is
+  also gone from the publish job, per npm's guidance that a release build should
+  not use it.
+
+### Added
+
+- **CI names the failing test.** A red run reported only "Process completed with
+  exit code 1"; the name, the file and the message were in a log behind a
+  sign-in. `scripts/jest-github-reporter.cjs` emits an annotation per failure, and
+  `verify:package` and the live-adapter smoke script are teed and their `FAIL`
+  lines converted the same way. The reporter reads Jest's result shape
+  defensively, because Jest 30 renamed `name`/`assertionResults` to
+  `testFilePath`/`testResults`.
 
 Nothing else changed. The 3.0.0 tool surface, the read-only guard and the five
 tools are as they were.

@@ -35,10 +35,26 @@ import { TOOLS, TOOL_NAMES, findTool, validateArgs, FORMATS } from './core/tools
  * `__filename` exists in the CommonJS output and the entry script is the
  * fallback; neither is trustworthy unless this file really is the entry point.
  */
+const ENTRY_RE = /(^|[\\/])src[\\/]index\.[cm]?js$/;
+
 function ownPath() {
   if (typeof __filename === 'string' && __filename !== '') return __filename;
   const entry = process.argv[1];
-  if (typeof entry === 'string' && /(^|[\\/])src[\\/]index\.[cm]?js$/.test(entry)) return entry;
+  if (typeof entry !== 'string' || entry === '') return null;
+  if (ENTRY_RE.test(entry)) return entry;
+
+  // npm's shim is a `.cmd` on Windows, which passes the real path to node, and a
+  // symlink everywhere else, so `argv[1]` is the link at node_modules/.bin and
+  // never matches. Without the realpath fallback the installed server cannot find
+  // its own package.json and exits before `initialize` -- which is why
+  // verify:package failed only on Linux and macOS, and why it failed on the two
+  // checks that need a version.
+  try {
+    const real = realpathSync(entry);
+    if (ENTRY_RE.test(real)) return real;
+  } catch {
+    // Not a path, or not readable. Same answer as no match.
+  }
   return null;
 }
 

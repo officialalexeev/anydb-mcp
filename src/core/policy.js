@@ -20,7 +20,7 @@
 import * as nodeDns from 'node:dns/promises';
 import * as nodeFs from 'node:fs';
 import * as nodePath from 'node:path';
-import { baseProtocol, stripSqlNoise, findWriteStage, MONGO_WRITE_ACTIONS } from './safety.js';
+import { baseProtocol, stripSqlNoise, findWriteStage } from './safety.js';
 
 /**
  * One numeric component of an IPv4 address. A leading zero is octal and a `0x`
@@ -840,12 +840,20 @@ const DESTRUCTIVE_SQL_RE = new RegExp(`\\b(?:${DESTRUCTIVE_SQL_VERBS.join('|')})
 const MONGO_SCHEMES = new Set(['mongodb', 'mongodb+srv']);
 
 /**
- * MongoDB actions that write. Built from `MONGO_WRITE_ACTIONS` in `./safety.js` so
- * the two lists cannot drift.
+ * MongoDB actions that change a collection's *shape or existence*, and so need
+ * the second gate: the MongoDB equivalents of `DROP` and `CREATE`, not of `INSERT`.
+ *
+ * Deliberately excludes `insert`, `update`, `replace` and `delete`. Those are
+ * data writes, and the read-only gate already covers them -- which is exactly
+ * where SQL draws the line, so an `INSERT` needs one flag on every backend. They
+ * were briefly in this set, built from `MONGO_WRITE_ACTIONS`, and the effect was
+ * that a model could add a row to Postgres with `readOnly: false` and needed
+ * `allowDestructive: true` for the same thing in MongoDB, with the reason
+ * "writes to a collection" for a write the previous gate had already permitted.
  */
-const DESTRUCTIVE_MONGO_ACTIONS = Object.freeze(new Set([
-  ...MONGO_WRITE_ACTIONS, 'drop', 'dropdatabase', 'create', 'createindex',
-].map((action) => action.toLowerCase())));
+const DESTRUCTIVE_MONGO_ACTIONS = Object.freeze(new Set(
+  ['drop', 'dropdatabase', 'create', 'createindex'].map((a) => a.toLowerCase())
+));
 
 /**
  * Redis commands that destroy data or reconfigure the server.
@@ -883,7 +891,7 @@ export function classifiesAsDestructive(query, protocol = '', options = {}) {
   if (MONGO_SCHEMES.has(base)) {
     const action = String(options.action ?? 'find').toLowerCase();
     if (DESTRUCTIVE_MONGO_ACTIONS.has(action)) {
-      return { destructive: true, reason: `the MongoDB "${action}" action writes to a collection` };
+      return { destructive: true, reason: `the MongoDB "${action}" action changes a collection's structure or existence` };
     }
     // $out and $merge replace a collection; `findWriteStage` walks nested facets.
     const stage = findWriteStage(safeJsonParse(query));

@@ -8,8 +8,8 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -1040,3 +1040,48 @@ function stdinCounts() {
     end: process.stdin.listenerCount('end'),
   };
 }
+
+describe('the installed bin shim resolves its own package.json', () => {
+  // npm writes a `.cmd` on Windows and a symlink everywhere else, so on Linux and
+  // macOS `process.argv[1]` is node_modules/.bin/anydb-mcp and never looks like
+  // src/index.js. Without the realpath fallback the server exits before
+  // `initialize` -- which is how verify:package failed on two checks on exactly
+  // the two operating systems that get a symlink, and passed on the one that
+  // does not.
+  const RE = /(^|[\\/])src[\\/]index\.[cm]?js$/;
+
+  test('the shim path itself does not match, which is the bug', () => {
+    expect(RE.test('/x/node_modules/.bin/anydb-mcp')).toBe(false);
+    expect(RE.test('/x/node_modules/anydb-mcp/src/index.js')).toBe(true);
+  });
+
+  test('a symlink to the entry resolves to one that does', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'anydb-shim-'));
+    // Laid out the way npm lays it out: the shim is a sibling of the package,
+    // and the entry is inside the package's own `src`.
+    const pkg = join(dir, 'anydb-mcp');
+    const real = join(pkg, 'src', 'index.js');
+    const link = join(dir, '.bin-anydb-mcp');
+    await mkdir(join(pkg, 'src'), { recursive: true });
+    try {
+      await writeFile(real, '');
+      try {
+        await symlink(real, link, 'file');
+      } catch (error) {
+        // Creating a file symlink needs a privilege Windows withholds from a
+        // normal account. The check above still pins the regex, which is the part
+        // that was wrong; this one is belt and braces where the OS allows it.
+        if (['EPERM', 'EACCES', 'ENOSYS'].includes(error.code)) {
+          expect(RE.test(link)).toBe(false);
+          return;
+        }
+        throw error;
+      }
+      const resolved = realpathSync(link);
+      expect(RE.test(link)).toBe(false);
+      expect(RE.test(resolved)).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

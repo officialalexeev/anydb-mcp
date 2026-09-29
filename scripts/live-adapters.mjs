@@ -162,8 +162,11 @@ async function drive(backend, uri) {
     }
 
     const report = await registry.describe(uri, { timeout: 20000 });
+    // 3.0 wraps every result in an envelope: the report is under `rows`.
+    const described = report && typeof report === 'object' ? (report.rows ?? report) : null;
     check(`${backend.name}: describe returns a report`,
-      report && typeof report === 'object' && 'database' in report, JSON.stringify(report).slice(0, 60));
+      described && typeof described === 'object' && 'database' in described,
+      JSON.stringify(described).slice(0, 60));
 
     check(`${backend.name}: the cache holds a live connection after all of it`,
       registry.cache.size >= 1, `${registry.cache.size} entries`);

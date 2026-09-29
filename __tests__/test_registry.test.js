@@ -977,20 +977,37 @@ describe('AdapterRegistry', () => {
       ).resolves.toBeDefined();
     });
 
-    test('refuses a Mongo write action without both flags', async () => {
-      const adapter = stubAdapter();
+    // A MongoDB data write takes the same single flag as a SQL one. These two
+    // asserted the opposite -- that `insert` needed the destructive gate -- and
+    // `scripts/live-adapters.mjs`, written against the SQL rule, failed on them.
+    test('a Mongo data write needs only the read-only flag', async () => {
+      const adapter = stubAdapter({ execute: jest.fn().mockResolvedValue([{ insertedId: 1 }]) });
       await expect(
         registryWith(adapter, ['mongodb']).run('mongodb://x', '{"a":1}', {
           collection: 'c', action: 'insert', readOnly: false
         })
-      ).rejects.toThrow(/destructive/i);
+      ).resolves.toBeDefined();
     });
 
-    test('allows a Mongo delete with both flags', async () => {
+    test('a Mongo $out is refused outright, not gated', async () => {
+      // `drop` and `create` are classified as destructive but are not actions on
+      // the tool surface, and an aggregation that replaces a collection is caught
+      // earlier and unconditionally, in every mode, because it is a write stage
+      // rather than a write action. So the destructive set has no live MongoDB
+      // path through the tools today; it is there for a future action and for a
+      // caller driving the library directly.
+      await expect(
+        registryWith(stubAdapter(), ['mongodb']).run('mongodb://x', '[{"$out":"c"}]', {
+          collection: 'c', action: 'aggregate', readOnly: false, allowDestructive: true
+        })
+      ).rejects.toMatchObject({ kind: 'policy', code: 'CODE_EXECUTION' });
+    });
+
+    test('allows a Mongo delete with the read-only flag alone', async () => {
       const adapter = stubAdapter({ execute: jest.fn().mockResolvedValue([{ deletedCount: 1 }]) });
       await expect(
         registryWith(adapter, ['mongodb']).run('mongodb://x', '{"a":1}', {
-          collection: 'c', action: 'delete', readOnly: false, allowDestructive: true
+          collection: 'c', action: 'delete', readOnly: false
         })
       ).resolves.toBeDefined();
     });
@@ -1365,10 +1382,11 @@ describe('AdapterRegistry', () => {
       async (action) => {
         const adapter = stubAdapter();
         const r = registryWith(adapter, ['mongodb']);
-        // Both gates: `classifiesAsDestructive` counts every MongoDB write as
-        // destructive, so `allowDestructive` is needed as well as `readOnly: false`.
+        // One gate, like `insert` and `delete` and like a SQL write: these are
+        // data writes, and a second flag for appending a row would make the first
+        // one meaningless.
         await expect(r.run('mongodb://x', '{"a":1}', {
-          collection: 'c', action, readOnly: false, allowDestructive: true
+          collection: 'c', action, readOnly: false
         })).resolves.toBeDefined();
         expect(adapter.execute).toHaveBeenCalledWith(
           '{"a":1}',
@@ -1385,14 +1403,11 @@ describe('AdapterRegistry', () => {
     );
 
     test.each(['updateOne', 'replace', 'deleteOne'])(
-      '%s needs the destructive second gate, like insert and delete',
+      '%s needs only the read-only flag, like insert and delete',
       async (action) => {
-        // `classifiesAsDestructive` keeps its own action list, so an action added to
-        // `MONGO_ACTIONS` and not there would run a write behind `readOnly: false`
-        // alone.
-        await expect(run(action, { readOnly: false }))
-          .rejects.toMatchObject({ kind: 'policy', code: 'DESTRUCTIVE' });
-        await expect(run(action, { readOnly: false, allowDestructive: true })).resolves.toBeDefined();
+        // The second gate is for DDL, not for data. These actions are the
+        // MongoDB equivalent of `UPDATE`/`DELETE`, which pass with one flag.
+        await expect(run(action, { readOnly: false })).resolves.toBeDefined();
       }
     );
 

@@ -789,6 +789,10 @@ describe('classifiesAsDestructive', () => {
 
   // The distinction the second gate exists for: `readOnly: false` is what a job
   // needs to append a row, so a second flag for that would make it meaningless.
+  // It is the same distinction on every backend. MongoDB's `insert` was briefly
+  // in the destructive set -- built from the write-action list rather than from
+  // the DDL-like names -- so the same row could be added to Postgres with one
+  // flag and to MongoDB with two.
   test.each([
     'DELETE FROM users',
     'UPDATE users SET a = 1',
@@ -797,6 +801,24 @@ describe('classifiesAsDestructive', () => {
     'MERGE INTO t USING s ON (1=1) WHEN MATCHED THEN UPDATE SET a = 1',
   ])('%s is a write but not destructive', (query) => {
     expect(classifiesAsDestructive(query, 'postgres').destructive).toBe(false);
+  });
+
+  test.each(['insert', 'update', 'updateOne', 'replace', 'delete', 'deleteOne'])(
+    'the MongoDB "%s" action is a write, not destructive',
+    (action) => {
+      expect(classifiesAsDestructive('{}', 'mongodb', { action }).destructive).toBe(false);
+    }
+  );
+
+  test.each(['drop', 'dropDatabase', 'create', 'createIndex'])(
+    'the MongoDB "%s" action is destructive',
+    (action) => {
+      expect(classifiesAsDestructive('{}', 'mongodb', { action }).destructive).toBe(true);
+    }
+  );
+
+  test('a $out stage is destructive in every mode', () => {
+    expect(classifiesAsDestructive('[{"$out":"c"}]', 'mongodb', { action: 'aggregate' }).destructive).toBe(true);
   });
 
   test('the reason names the verb', () => {
@@ -862,10 +884,28 @@ describe('classifiesAsDestructive', () => {
   });
 
   describe('MongoDB', () => {
-    test.each(['insert', 'update', 'delete'])('the %s action is destructive', (action) => {
-      expect(classifiesAsDestructive('{"a":1}', 'mongodb', { action }).destructive).toBe(true);
-      expect(classifiesAsDestructive('{"a":1}', 'mongodb+srv', { action }).destructive).toBe(true);
-    });
+    // Data writes are what `readOnly: false` is for, and a MongoDB `insert` is
+    // the same operation as a SQL `INSERT` -- which the block above already
+    // requires only one flag for. These were classified as destructive, built
+    // from the write-action list rather than from the names that change a
+    // collection's structure, so the same row needed two flags on MongoDB and one
+    // on every SQL backend. `scripts/live-adapters.mjs` assumed the SQL rule and
+    // failed, which is what surfaced it.
+    test.each(['insert', 'update', 'updateOne', 'replace', 'delete', 'deleteOne'])(
+      'the %s action is a write, not destructive',
+      (action) => {
+        expect(classifiesAsDestructive('{"a":1}', 'mongodb', { action }).destructive).toBe(false);
+        expect(classifiesAsDestructive('{"a":1}', 'mongodb+srv', { action }).destructive).toBe(false);
+      }
+    );
+
+    test.each(['drop', 'dropDatabase', 'create', 'createIndex'])(
+      'the %s action changes a collection and is destructive',
+      (action) => {
+        expect(classifiesAsDestructive('{"a":1}', 'mongodb', { action }).destructive).toBe(true);
+        expect(classifiesAsDestructive('{"a":1}', 'mongodb+srv', { action }).destructive).toBe(true);
+      }
+    );
 
     test.each(['find', 'count', 'distinct', 'aggregate', 'explain'])('the %s action is not', (action) => {
       expect(classifiesAsDestructive('{"a":1}', 'mongodb', { action }).destructive).toBe(false);
@@ -890,8 +930,12 @@ describe('classifiesAsDestructive', () => {
       expect(classifiesAsDestructive(pipeline, 'mongodb', { action: 'aggregate' }).destructive).toBe(false);
     });
 
-    test('malformed JSON with a write action is still destructive', () => {
-      expect(classifiesAsDestructive('{not json', 'mongodb', { action: 'insert' }).destructive).toBe(true);
+    test('an unparseable payload is decided by the action alone', () => {
+      // The payload does not change what the action does, so there is nothing
+      // here to read. A write action is still a write, and `readOnly: false` is
+      // what it needs.
+      expect(classifiesAsDestructive('{not json', 'mongodb', { action: 'insert' }).destructive).toBe(false);
+      expect(classifiesAsDestructive('{not json', 'mongodb', { action: 'drop' }).destructive).toBe(true);
       expect(classifiesAsDestructive('{not json', 'mongodb', { action: 'find' }).destructive).toBe(false);
     });
   });
@@ -1015,13 +1059,22 @@ describe('evaluatePolicy', () => {
       expect(policy.destructiveAllowed).toBe(true);
     });
 
-    test('a MongoDB write is gated the same way', () => {
+    test('a MongoDB write needs only the read-only flag, like a SQL write', () => {
       const policy = evaluatePolicy(
-        { readOnly: false, allowDestructive: true },
+        { readOnly: false },
         { env: {}, query: '{"a":1}', options: { protocol: 'mongodb', action: 'delete' } }
       );
-      expect(policy.destructive).toBe(true);
+      expect(policy.destructive).toBe(false);
       expect(policy.destructiveAllowed).toBe(true);
+    });
+
+    test('a MongoDB drop needs both, like a SQL DROP', () => {
+      const policy = evaluatePolicy(
+        { readOnly: false },
+        { env: {}, query: '{"a":1}', options: { protocol: 'mongodb', action: 'drop' } }
+      );
+      expect(policy.destructive).toBe(true);
+      expect(policy.destructiveAllowed).toBe(false);
     });
 
     test('no query means nothing to classify', () => {
