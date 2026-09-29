@@ -327,12 +327,22 @@ jobs:
     - name: Drive them through the adapter
       # `pipefail` so a failing test fails the step, and the log is teed for the
       # step below to turn into annotations.
+      #
+      # `--forceExit` is here because the run otherwise never ends: a client that
+      # has been told to close but has not finished disconnecting keeps the event
+      # loop alive, jest waits for it, and the step sits until the job's own
+      # timeout - which is what happened for several runs, with the test results
+      # lost because annotations are only published when a step finishes. Forcing
+      # the exit gets the results reported. Whether the handle is a leak in the
+      # adapter or in the driver is a separate question this does not pretend to
+      # answer; the teardown step below is `always()` either way.
       run: |
         set -o pipefail
         set -a
         . ./redis-topologies.env
         set +a
-        npx jest __tests__/test_redis_topologies_live.test.js 2>&1 | tee redis-topologies.log
+        npx jest --forceExit __tests__/test_redis_topologies_live.test.js 2>&1 \
+          | tee redis-topologies.log
 
     - name: Surface what failed
       if: failure()
