@@ -9,6 +9,31 @@ Release links for every version are at the bottom of this file.
 
 ## [Unreleased]
 
+## [3.0.5] - 2026-10-02
+
+> Metadata and README only. No tool, no protocol surface, no behaviour change:
+> the published tarball contains the same five tools with the same schemas.
+
+### Changed
+
+- **One description, three places.** The GitHub About line, `package.json` and
+  the README tagline were three different strings, and only the GitHub one
+  carried the word "ultimate". All three now read:
+  `One MCP server for five databases — PostgreSQL, MySQL, SQLite, MongoDB and
+  Redis — with named connection profiles, so database passwords never enter the
+  model's context window.`
+- **Dropped "Zero-config".** It was contradicted by the README's own Quick start,
+  which creates `~/.anydb/db.json` before `db_list` can answer. What is true, and
+  now what is said: no environment variables, and no connection strings in
+  prompts.
+- **`homepage` and `bugs` added to `package.json`.** Both were absent, so npm fell
+  back to an auto-generated `#readme` anchor and had nowhere to send issue
+  reports.
+- **`## Why five tools` moved above `## Quick start` in the README.** The argument
+  for the five-tool surface — 21,441 bytes against 19.0k for a twenty-eight-tool
+  alternative — is the thing a reader has to see before reading 166 lines of
+  per-client configuration.
+
 ## [3.0.4] - 2026-09-29
 
 > Two of these are security-relevant and one is a behaviour change. Read the

@@ -6,7 +6,7 @@
 [![Downloads](https://img.shields.io/npm/dm/anydb-mcp.svg?style=flat-square)](https://www.npmjs.com/package/anydb-mcp)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
 
-**The Universal Database Connector for AI Agents**
+**One MCP server for five databases — PostgreSQL, MySQL, SQLite, MongoDB and Redis — with named connection profiles, so database passwords never enter the model's context window.**
 
 </div>
 
@@ -16,6 +16,12 @@ surface, with **named connection profiles** so a database password never enters
 the model's context window.
 
 Requires Node 20.19 or newer; that floor comes from the database drivers.
+
+Works with Claude Code, Claude Desktop, Cursor, Gemini CLI, Zed, Cline and any
+other MCP client — they all run the same command.
+
+> No environment variables and no connection strings in your prompts: the server
+> reads named profiles from `~/.anydb/db.json`, which you create once.
 
 - [Quick start](#quick-start)
 - [Why five tools](#why-five-tools)
@@ -37,6 +43,46 @@ Requires Node 20.19 or newer; that floor comes from the database drivers.
 - [Contributing](#contributing)
 - [Documentation](#documentation)
 - [License](#license)
+
+---
+
+## Why five tools
+
+Every `tools/list` response is paid for on **every request, by every model, in
+every session**, before anything useful has happened. A model is not reading a
+manual; it is paying rent on the tool list. For a third party's own numbers on
+that trade, DBHub's README reports itself at 1.4k tokens for two tools against
+MCP Toolbox at 19.0k for twenty-eight - a comparison that project makes about
+itself, measured with its own script, and is reproduced here as an indication of
+scale rather than as an independent measurement. This server's own figure is
+measured from its own `TOOLS` and is in the table below.
+
+So this server exposes five tools, not five-and-a-helper-per-driver: **the
+database is inferred from the connection, not from the tool name.** Twenty-three
+tools would describe five databases five times over.
+
+The whole `tools/list` payload is **21,441 bytes** for all five tools, which is
+roughly 5,400 tokens at four bytes per token — an approximation, since the real
+ratio depends on the model, but the byte count below is measured, not estimated:
+
+| Tool | Bytes |
+|------|-------|
+| `db_query` | 7,963 |
+| `db_schema` | 4,138 |
+| `db_explain` | 4,216 |
+| `db_health` | 3,569 |
+| `db_list` | 1,539 |
+
+`__tests__/test_tools.test.js` measures that payload on every run and fails the
+build above **21,500 bytes**, so growth is visible in a diff rather than
+discovered in somebody else's context window. The ceiling is not negotiable, and
+when the surface has to grow the bytes come out of text that is **duplicated
+elsewhere** — usually an envelope description, since the same sentences are read
+once per session in `instructions` — rather than from the ceiling going up. The
+same test also fails the build if a digit appears in any description that is not
+one of the constants the server actually enforces: a hardcoded `86400000` in prose
+is a promise about a bound that lives somewhere else in the tree, and the only
+question is when somebody changes one of them.
 
 ---
 
@@ -203,46 +249,6 @@ env:     ANYDB_CONFIG=/path/to/db.json
 On Windows, use `npx.cmd` if your client cannot launch `npx` through a shell.
 
 </details>
-
----
-
-## Why five tools
-
-Every `tools/list` response is paid for on **every request, by every model, in
-every session**, before anything useful has happened. A model is not reading a
-manual; it is paying rent on the tool list. For a third party's own numbers on
-that trade, DBHub's README reports itself at 1.4k tokens for two tools against
-MCP Toolbox at 19.0k for twenty-eight - a comparison that project makes about
-itself, measured with its own script, and is reproduced here as an indication of
-scale rather than as an independent measurement. This server's own figure is
-measured from its own `TOOLS` and is in the table below.
-
-So this server exposes five tools, not five-and-a-helper-per-driver: **the
-database is inferred from the connection, not from the tool name.** Twenty-three
-tools would describe five databases five times over.
-
-The whole `tools/list` payload is **21,441 bytes** for all five tools, which is
-roughly 5,400 tokens at four bytes per token — an approximation, since the real
-ratio depends on the model, but the byte count below is measured, not estimated:
-
-| Tool | Bytes |
-|------|-------|
-| `db_query` | 7,963 |
-| `db_schema` | 4,138 |
-| `db_explain` | 4,216 |
-| `db_health` | 3,569 |
-| `db_list` | 1,539 |
-
-`__tests__/test_tools.test.js` measures that payload on every run and fails the
-build above **21,500 bytes**, so growth is visible in a diff rather than
-discovered in somebody else's context window. The ceiling is not negotiable, and
-when the surface has to grow the bytes come out of text that is **duplicated
-elsewhere** — usually an envelope description, since the same sentences are read
-once per session in `instructions` — rather than from the ceiling going up. The
-same test also fails the build if a digit appears in any description that is not
-one of the constants the server actually enforces: a hardcoded `86400000` in prose
-is a promise about a bound that lives somewhere else in the tree, and the only
-question is when somebody changes one of them.
 
 ---
 

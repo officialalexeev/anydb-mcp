@@ -1,7 +1,7 @@
 {
   "name": "anydb-mcp",
-  "version": "3.0.4",
-  "description": "Universal database connector for AI agents (Cursor, Claude, Gemini, Zed, Cline). Zero-config MCP server for PostgreSQL, MySQL, SQLite, MongoDB, and Redis.",
+  "version": "3.0.5",
+  "description": "One MCP server for five databases — PostgreSQL, MySQL, SQLite, MongoDB and Redis — with named connection profiles, so database passwords never enter the model's context window.",
   "type": "module",
   "main": "src/lib.js",
   "exports": {
@@ -18,6 +18,10 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/officialalexeev/anydb-mcp.git"
+  },
+  "homepage": "https://github.com/officialalexeev/anydb-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/officialalexeev/anydb-mcp/issues"
   },
   "files": [
     "src/",
